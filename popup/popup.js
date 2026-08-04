@@ -201,35 +201,51 @@ chrome.storage.onChanged.addListener((changes, area) => {
  * Update banner. Installing happens on the options page — a file picker
  * cannot be opened from a popup without the popup closing.
  * ------------------------------------------------------------------ */
-function showUpdate(text, kind, actionLabel) {
+// What the button does right now: re-check, or go to the options page to
+// install. There is always a button, so an up-to-date state can still be
+// re-checked on demand rather than waiting for the cache to expire.
+let updateAction = 'check';
+
+function showUpdate(text, kind, actionLabel, action) {
   el.updateBar.hidden = false;
   el.updateBar.className = `update-bar${kind ? ' ' + kind : ''}`;
   el.updateText.textContent = text;
   el.updateAction.hidden = !actionLabel;
+  el.updateAction.disabled = false;
   if (actionLabel) el.updateAction.textContent = actionLabel;
+  if (action) updateAction = action;
 }
 
-async function checkUpdate() {
-  el.version.textContent = `v${chrome.runtime.getManifest().version}`;
-  const res = await send({ type: 'checkUpdate' });
+function applyUpdateResult(res) {
   if (!res || !res.ok) {
-    showUpdate((res && res.error) || 'Update check failed.', 'err', 'Settings');
+    showUpdate((res && res.error) || 'Update check failed.', 'err', 'Settings', 'options');
     return;
   }
   if (!res.configured) {
-    showUpdate('Update checking is not set up yet.', null, 'Set up');
+    showUpdate('Update checking is not set up yet.', null, 'Set up', 'options');
     return;
   }
   if (res.hasUpdate) {
-    showUpdate(`Update available: v${res.latest}`, null, 'Update');
+    showUpdate(`Update available: v${res.latest}`, null, 'Update', 'options');
   } else {
-    showUpdate(`You are on the latest version (v${res.current}).`, 'ok');
+    showUpdate(`You are on the latest version (v${res.current}).`, 'ok', 'Check', 'check');
   }
 }
 
+async function checkUpdate(force) {
+  el.version.textContent = `v${chrome.runtime.getManifest().version}`;
+  applyUpdateResult(await send({ type: 'checkUpdate', force: !!force }));
+}
+
 el.updateAction.addEventListener('click', async () => {
-  await send({ type: 'openOptions' });
-  window.close();
+  if (updateAction === 'options') {
+    await send({ type: 'openOptions' });
+    window.close();
+    return;
+  }
+  el.updateAction.disabled = true;
+  el.updateAction.textContent = 'Checking…';
+  await checkUpdate(true); // force: ignore the cached answer
 });
 
 (async function init() {

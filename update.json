@@ -1,8 +1,7 @@
 {
-    "version":  "1.5.0",
+    "version":  "1.5.1",
     "notes":  [
-                  "Installing an update now asks for the extension folder itself, so there is no separate setup step.",
-                  "Folder and repo settings moved into a collapsed Advanced section."
+                  "The popup now always has a button in the update bar - Check when you are up to date, Update when there is a new version."
               ],
     "files":  [
                   "background/background.js",
