@@ -177,6 +177,35 @@ button.primary:hover:not(:disabled) {
   color: var(--ok);
 }
 
+/* Advanced settings stay folded away — nobody normally needs them. */
+details.advanced summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  list-style: none;
+}
+
+details.advanced summary::-webkit-details-marker {
+  display: none;
+}
+
+details.advanced summary::before {
+  content: "\25B8 ";
+  display: inline-block;
+  transition: transform 0.15s;
+}
+
+details.advanced[open] summary::before {
+  transform: rotate(90deg);
+}
+
+details.advanced summary + * {
+  margin-top: 12px;
+}
+
 code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;

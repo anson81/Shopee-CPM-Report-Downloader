@@ -101,13 +101,25 @@ async function send(msg) {
 /* ------------------------------------------------------------------ *
  * Update source
  * ------------------------------------------------------------------ */
+// Matches DEFAULT_UPDATE_SOURCE in background.js — nobody has to set this up.
+const DEFAULT_SOURCE = {
+  owner: 'anson81',
+  repo: 'Shopee-CPM-Report-Downloader',
+  branch: 'main'
+};
+
 async function loadSource() {
   const { updateSource } = await chrome.storage.local.get('updateSource');
-  if (!updateSource) return null;
-  el.owner.value = updateSource.owner || '';
-  el.repo.value = updateSource.repo || '';
-  el.branch.value = updateSource.branch || 'main';
-  return updateSource;
+  const source =
+    updateSource && updateSource.owner && updateSource.repo
+      ? updateSource
+      : DEFAULT_SOURCE;
+  el.owner.value = source.owner;
+  el.repo.value = source.repo;
+  el.branch.value = source.branch || 'main';
+  const label = document.getElementById('current-source');
+  if (label) label.textContent = `${source.owner}/${source.repo}`;
+  return source;
 }
 
 el.saveSource.addEventListener('click', async () => {

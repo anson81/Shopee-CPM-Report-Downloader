@@ -40,23 +40,22 @@
         </p>
       </section>
 
-      <section class="card">
-        <h2>Update source</h2>
-        <p class="hint">The public GitHub repository holding the latest files.</p>
+      <details class="card advanced">
+        <summary>Advanced</summary>
+        <p class="hint">
+          Updates come from <span id="current-source"></span>. You only need to
+          change this if that ever moves.
+        </p>
         <div class="row fields">
-          <label>Owner <input id="owner" type="text" placeholder="your-github-username" /></label>
-          <label>Repo <input id="repo" type="text" placeholder="shopee-report-downloader" /></label>
+          <label>Owner <input id="owner" type="text" placeholder="anson81" /></label>
+          <label>Repo <input id="repo" type="text" placeholder="Shopee-CPM-Report-Downloader" /></label>
           <label>Branch <input id="branch" type="text" placeholder="main" /></label>
         </div>
         <div class="row">
           <button id="save-source" class="primary">Save</button>
           <span id="source-saved" class="saved" hidden>Saved</span>
         </div>
-        <p class="hint">
-          The repo needs an <code>update.json</code> at its root listing the
-          version and the files to fetch. See <code>README.md</code>.
-        </p>
-      </section>
+      </details>
     </main>
 
     <script src="options.js"></script>

@@ -1,8 +1,8 @@
 {
-    "version":  "1.3.1",
+    "version":  "1.4.0",
     "notes":  [
-                  "GMV Max is saved into the dated folder under its real name - our own download path is now re-asserted so another extension cannot redirect it into plain Downloads.",
-                  "A file Chrome saves under the wrong name is now reported as an error instead of a tick."
+                  "New icon.",
+                  "Update settings are built in - nothing to configure after installing."
               ],
     "files":  [
                   "background/background.js",

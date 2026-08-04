@@ -833,9 +833,18 @@ function compareVersions(a, b) {
   return 0;
 }
 
+// Built in, so nobody installing this has to configure anything. Overridable
+// from the options page only if the repo ever moves.
+const DEFAULT_UPDATE_SOURCE = {
+  owner: 'anson81',
+  repo: 'Shopee-CPM-Report-Downloader',
+  branch: 'main'
+};
+
 async function getUpdateConfig() {
   const { updateSource } = await chrome.storage.local.get('updateSource');
-  return updateSource || null; // { owner, repo, branch }
+  if (updateSource && updateSource.owner && updateSource.repo) return updateSource;
+  return DEFAULT_UPDATE_SOURCE;
 }
 
 function rawUrl(cfg, file) {
