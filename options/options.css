@@ -206,6 +206,17 @@ details.advanced summary + * {
   margin-top: 12px;
 }
 
+details.advanced h3 {
+  margin: 20px 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+details.advanced h3:first-of-type {
+  margin-top: 14px;
+}
+
 code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;

@@ -23,25 +23,21 @@
         <div id="progress" class="progress" hidden></div>
       </section>
 
-      <section class="card">
-        <h2>Extension folder</h2>
+      <details class="card advanced">
+        <summary>Advanced</summary>
+
+        <h3>Extension folder</h3>
         <p class="hint">
-          Granted once, this lets the update install itself. Without it you can
-          still update by replacing the files yourself.
+          Asked for automatically the first time you install an update. Shown
+          here only so you can change or revoke it.
         </p>
         <div id="folder-status" class="status">Not granted yet.</div>
         <div class="row">
           <button id="pick-folder">Choose the extension folder…</button>
           <button id="forget-folder" hidden>Forget it</button>
         </div>
-        <p class="hint">
-          Pick the folder containing <code>manifest.json</code> — the one you
-          selected with <em>Load unpacked</em>.
-        </p>
-      </section>
 
-      <details class="card advanced">
-        <summary>Advanced</summary>
+        <h3>Update source</h3>
         <p class="hint">
           Updates come from <span id="current-source"></span>. You only need to
           change this if that ever moves.

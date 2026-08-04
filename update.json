@@ -1,8 +1,8 @@
 {
-    "version":  "1.4.0",
+    "version":  "1.5.0",
     "notes":  [
-                  "New icon.",
-                  "Update settings are built in - nothing to configure after installing."
+                  "Installing an update now asks for the extension folder itself, so there is no separate setup step.",
+                  "Folder and repo settings moved into a collapsed Advanced section."
               ],
     "files":  [
                   "background/background.js",

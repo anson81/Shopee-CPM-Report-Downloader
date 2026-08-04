@@ -29,6 +29,9 @@ const el = {
 };
 
 let latest = null; // last successful check result
+// Cached at load so the install click can open the folder picker immediately.
+// Reading IndexedDB first would risk spending the click's user-activation.
+let folderHandle = null;
 
 /* ------------------------------------------------------------------ *
  * Directory handle storage. Handles are structured-clonable but not
@@ -168,6 +171,7 @@ async function verifyFolder(handle) {
 
 async function refreshFolderStatus() {
   const handle = await idbGet('extensionDir');
+  folderHandle = handle;
   if (!handle) {
     setStatus(el.folderStatus, 'Not granted yet.', 'warn');
     el.forgetFolder.hidden = true;
@@ -187,29 +191,39 @@ async function refreshFolderStatus() {
   return handle;
 }
 
-el.pickFolder.addEventListener('click', async () => {
+/**
+ * Ask for the extension folder. Must be called straight from a click — the
+ * directory picker needs user activation, and there is no way to grant folder
+ * access without the person choosing it themselves.
+ *
+ * Returns the handle, or null with `statusNode` explaining why not.
+ */
+async function requestFolder(statusNode) {
   if (!window.showDirectoryPicker) {
-    setStatus(el.folderStatus, 'This Chrome build has no directory picker.', 'err');
-    return;
+    setStatus(statusNode, 'This Chrome build has no directory picker.', 'err');
+    return null;
   }
   let handle;
   try {
     handle = await window.showDirectoryPicker({ mode: 'readwrite' });
   } catch (_) {
-    return; // user cancelled
+    return null; // cancelled
   }
   const problem = await verifyFolder(handle);
   if (problem) {
-    setStatus(el.folderStatus, problem, 'err');
-    return;
+    setStatus(statusNode, problem, 'err');
+    return null;
   }
   if (!(await handlePermission(handle, true))) {
-    setStatus(el.folderStatus, 'Write permission was declined.', 'err');
-    return;
+    setStatus(statusNode, 'Write permission was declined.', 'err');
+    return null;
   }
   await idbSet('extensionDir', handle);
   await refreshFolderStatus();
-});
+  return handle;
+}
+
+el.pickFolder.addEventListener('click', () => requestFolder(el.folderStatus));
 
 el.forgetFolder.addEventListener('click', async () => {
   await idbDelete('extensionDir');
@@ -290,10 +304,20 @@ el.install.addEventListener('click', async () => {
     return;
   }
 
-  const handle = await idbGet('extensionDir');
+  // First update ever: ask for the folder right here, so installing is one
+  // button rather than a setup step people have to find.
+  let handle = folderHandle;
   if (!handle) {
-    setStatus(el.status, 'Grant access to the extension folder first (below).', 'err');
-    return;
+    setStatus(el.status, 'Choose the extension folder so the update can install itself…');
+    handle = await requestFolder(el.status);
+    if (!handle) {
+      setStatus(
+        el.status,
+        'Update cancelled — the extension folder is needed to install it.',
+        'warn'
+      );
+      return;
+    }
   }
   if (!(await handlePermission(handle, true))) {
     setStatus(el.status, 'Write permission was declined.', 'err');
