@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <h1>&#128229; Shopee Report Downloader</h1>
+      <span id="version" class="version">v…</span>
+    </header>
+
+    <div id="update-bar" class="update-bar" hidden>
+      <span id="update-text"></span>
+      <button id="update-action" hidden>Update</button>
+    </div>
+
+    <section class="actions">
+      <button id="run-steady" class="primary">
+        &#128012; Slow n Steady
+        <small>One tab at a time &middot; ~12 min</small>
+      </button>
+      <button id="run-furious" class="primary furious">
+        &#127950; Fast n Furious
+        <small>All tabs at once &middot; ~4 min</small>
+      </button>
+      <button id="cancel" class="danger" hidden>Stop</button>
+
+      <div class="specific">
+        <span class="specific-label">Download specific</span>
+        <div id="picker" class="picker"></div>
+      </div>
+    </section>
+
+    <div id="banner" class="banner" hidden></div>
+
+    <section class="progress">
+      <h2>Progress</h2>
+      <ul id="rows" class="rows"></ul>
+    </section>
+
+    <footer>
+      <span id="last-run">No runs yet.</span>
+      <button id="open-folder" type="button" title="Open the folder these reports were saved in">
+        &#128193; Open folder
+      </button>
+    </footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Shopee Report Downloader — Updates</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <header>
+      <h1>&#128229; Shopee Report Downloader</h1>
+      <span id="version" class="version">v…</span>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>Updates</h2>
+        <div id="status" class="status">Checking…</div>
+        <ul id="notes" class="notes" hidden></ul>
+        <div class="row">
+          <button id="check">Check again</button>
+          <button id="install" class="primary" hidden>Download &amp; install update</button>
+        </div>
+        <div id="progress" class="progress" hidden></div>
+      </section>
+
+      <section class="card">
+        <h2>Extension folder</h2>
+        <p class="hint">
+          Granted once, this lets the update install itself. Without it you can
+          still update by replacing the files yourself.
+        </p>
+        <div id="folder-status" class="status">Not granted yet.</div>
+        <div class="row">
+          <button id="pick-folder">Choose the extension folder…</button>
+          <button id="forget-folder" hidden>Forget it</button>
+        </div>
+        <p class="hint">
+          Pick the folder containing <code>manifest.json</code> — the one you
+          selected with <em>Load unpacked</em>.
+        </p>
+      </section>
+
+      <section class="card">
+        <h2>Update source</h2>
+        <p class="hint">The public GitHub repository holding the latest files.</p>
+        <div class="row fields">
+          <label>Owner <input id="owner" type="text" placeholder="your-github-username" /></label>
+          <label>Repo <input id="repo" type="text" placeholder="shopee-report-downloader" /></label>
+          <label>Branch <input id="branch" type="text" placeholder="main" /></label>
+        </div>
+        <div class="row">
+          <button id="save-source" class="primary">Save</button>
+          <span id="source-saved" class="saved" hidden>Saved</span>
+        </div>
+        <p class="hint">
+          The repo needs an <code>update.json</code> at its root listing the
+          version and the files to fetch. See <code>README.md</code>.
+        </p>
+      </section>
+    </main>
+
+    <script src="options.js"></script>
+  </body>
+</html>
