@@ -1,8 +1,7 @@
 {
-    "version":  "1.8.0",
+    "version":  "1.8.1",
     "notes":  [
-                  "When Real Time is pinned to an earlier day, the whole run is now filed under that day\u0027s folder instead of the day you ran it. The time in the sub-folder name still records when it actually ran.",
-                  "The popup shows which folder a run will save into."
+                  "Rewrote the README for people installing it, with the download link and simple steps first. Technical notes moved into a collapsed section."
               ],
     "files":  [
                   "background/background.js",

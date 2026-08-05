@@ -1,121 +1,130 @@
-# Shopee Report Downloader
+# 📥 Shopee Report Downloader
 
-Manifest V3 Chrome extension. Downloads the 7 daily reports from Shopee Seller
-Center Malaysia into `Downloads/Shopee daily report/DDMMYYYY-DayOfWeek/DDMMYYYY-DayOfWeek-HHMM/`,
-one sub-folder per run so repeat runs in a day never mix. When Real Time is pinned to an earlier day, the folder is named for THAT day, not the day you ran it,
-keeping Shopee's original filenames.
+A Chrome extension that downloads all **7 daily reports** from Shopee Seller
+Centre Malaysia with one click, instead of clicking through the site seven
+times.
 
-On-demand only — no scheduling, no renaming.
+Files keep Shopee's own names and are sorted into dated folders:
+
+```
+Downloads/
+  Shopee daily report/
+    05082026-Wednesday/
+      05082026-Wednesday-0823/      ← one folder per run
+        parentskudetail.20260804_20260804.xlsx
+        Shopee-Ads-Overall-Data-30_07_2026-05_08_2026.csv
+        ...
+```
+
+---
 
 ## Install
 
-1. Open `chrome://extensions`.
-2. Turn on **Developer mode** (top right).
-3. Click **Load unpacked** and pick this folder.
-4. Pin the extension so the icon is visible.
+**1. Download**
 
-Requires Chrome 111+ (the blob interceptor needs `world: "MAIN"` content
-scripts).
+[⬇ Download the extension](https://github.com/anson81/Shopee-CPM-Report-Downloader/archive/refs/heads/main.zip)
 
-## Use
+**2. Unzip it, and keep the folder somewhere safe**
 
-1. Log in to `seller.shopee.com.my` in the same Chrome profile.
-2. Click the extension icon.
-3. Pick a mode, or a single numbered button for one report.
+Documents is a good spot. **Not** Downloads — Chrome reads from this folder
+every time you use the extension, so it must not be deleted or moved later.
 
-| Mode | How it works | Roughly |
-|------|--------------|---------|
-| 🐌 **Slow n Steady** | One tab, one export at a time, 65s between each | ~12 min |
-| 🏎 **Fast n Furious** | Opens all 7 pages at once so their loads overlap, then exports tab by tab with a 3s gap | ~4 min |
+**3. Add it to Chrome**
 
-Both produce identical files. Steady is the conservative path: if Shopee ever
-does start rate-limiting, it is the one that will ride it out. Furious relies
-on the observation that exports for *different* periods do not contend — verified
-by hand, not documented by Shopee, so keep Steady as the fallback.
+1. Type `chrome://extensions` in the address bar
+2. Turn on **Developer mode** (top right)
+3. Click **Load unpacked** (top left)
+4. Choose the folder you unzipped
 
-Only the page **loading** is parallel in Furious mode. Each tab is still
-brought to the front and driven one at a time, because Chrome throttles timers
-in background tabs and Shopee's SPA will not keep up otherwise.
+The orange icon appears in your toolbar. Pin it if you like.
 
-Tabs are closed as each export finishes. On failure they are left open so you
-can see where Shopee stopped cooperating.
+> Chrome may show a popup saying *"Disable developer mode extensions"* when it
+> starts. That is normal for extensions installed this way — just close it.
 
-Individual numbered buttons always use the Steady path — a single report has
-nothing to parallelise.
+---
 
-**Keep the window visible while it runs.** Chrome throttles timers in minimised
-or fully occluded windows, and Shopee's SPA will not finish rendering.
+## Using it
 
-A full run takes roughly 5–12 minutes. The popup can be closed; progress lives
-in the service worker and is mirrored to `chrome.storage.local`, so reopening
-the popup shows the current state. The toolbar badge shows the final count.
+1. Log in to [Shopee Seller Centre](https://seller.shopee.com.my) as you normally would
+2. Click the orange icon
+3. Pick a mode:
 
-## The 7 exports
+| Mode | What it does | Time |
+|------|--------------|------|
+| 🐌 **Slow n Steady** | One tab at a time. The safe option. | ~12 min |
+| 🏎 **Fast n Furious** | Opens all 7 pages together, then collects them. | ~4 min |
 
-| # | Report | Page | Notes |
-|---|--------|------|-------|
-| 1 | Real Time | Business Insights → Product Performance | default period |
-| 2 | Yesterday | same | period select |
-| 3 | By Day (3 days ago) | same | date = today − 2 |
-| 4 | Past 7 Days | same | period select |
-| 5 | By Week (last week) | same | calendar hover flow |
-| 6 | Ads Overall | Shopee Ads → Product Ads | Latest Reports → Download |
-| 7 | Ads GMV MAX | same | confirm modal → API polling |
+4. **Leave the window open and don't touch it** while it runs
+5. When it finishes, click **Open folder** to see your files
 
-## How files are captured
+Both modes produce identical files. Use Slow n Steady if Fast n Furious ever
+gives you trouble.
 
-Shopee delivers reports three different ways, so the extension tries three, in
-order, per export:
+You can also click a single number (1–7) to download just that one report.
 
-1. **Shopee's own browser download.** `downloads.onDeterminingFilename`
-   redirects it into the dated subfolder. Shopee picks the filename; we only
-   prepend the folder. This is the common path and produces exactly one file.
-2. **`get_download_url` API.** The response is fetched with the session
-   cookies and saved. Used by Ads GMV MAX, which has no download panel at all.
-3. **Intercepted blob.** `URL.createObjectURL` is hooked in the page's own
-   JavaScript context (`content/interceptor.js`, MAIN world, `document_start`)
-   and the bytes are saved via a data URL. The original filename comes from the
-   `download` attribute of the anchor Shopee clicks.
+### Choosing an earlier day
 
-Whichever fires first wins, so a report is never saved twice. Files are written
-with `conflictAction: "overwrite"` — re-running on the same day replaces that
-day's file instead of creating `… (1).xlsx`, which would break the "never
-rename" rule.
+The best time to grab **Real Time** is late at night, when the day's data is
+complete. If you miss that, set **Real Time covers** to an earlier date and the
+extension fetches that whole day instead.
+
+The whole run is then filed under that day's folder, not today's.
+
+### The 7 reports
+
+| # | Report | Covers |
+|---|--------|--------|
+| 1 | Real Time | today, or the date you picked |
+| 2 | Yesterday | yesterday |
+| 3 | By Day | 3 days ago |
+| 4 | Past 7 Days | the last 7 days |
+| 5 | By Week | last week |
+| 6 | Ads Overall | Shopee's own range |
+| 7 | Ads GMV MAX | Shopee's own range |
+
+Each row in the popup shows the exact date it will fetch.
+
+---
 
 ## Updates
 
-The popup shows the running version and whether a newer one exists. Chrome only
-auto-updates Web Store extensions, so this one checks a GitHub repo instead and
-installs the update itself once you have granted it access to its own folder.
+The extension checks for updates by itself. When one is available the popup
+says so — click **Update** and it installs itself.
 
-**One-time setup**
+The first time you update, Chrome asks you to pick the extension folder. That
+is a one-off, and it is the only way a browser will let an extension write to
+its own folder.
 
-1. Create a **public** GitHub repo and push the contents of this folder to it.
-2. Right-click the extension icon → **Options**.
-3. Under *Update source*, enter the repo owner, name and branch, then **Save**.
-4. Under *Extension folder*, click **Choose the extension folder…** and pick
-   this folder — the one you selected with *Load unpacked*. Chrome asks for
-   write permission once.
+You can also press **Check** in the popup at any time.
 
-**Publishing a new version**
+---
 
-```powershell
-.\tools\make-release.ps1 -Version 1.2.0 -Notes "What changed","And this"
-git add -A; git commit -m "v1.2.0"; git push
-```
+## If something goes wrong
 
-`make-release.ps1` bumps `manifest.json` and regenerates `update.json` from
-what is actually on disk, so the file list cannot drift out of sync.
+| Problem | What to do |
+|---------|-----------|
+| "Please log in to Shopee Seller Center first" | Log in to Seller Centre in the same Chrome, then run again |
+| A report shows a red error | Run just that number again. Shopee's page is sometimes slow |
+| Nothing downloads | Make sure the Chrome window stayed open and visible during the run |
+| The extension disappeared | The folder was moved or deleted. Unzip it again and re-add it |
 
-**Installing**: the popup shows *Update available: v1.2.0* → **Update** opens
-the options page → **Download & install update**. Every file is fetched and
-validated before anything is written (a half-written folder will not load), then
-`chrome.runtime.reload()` restarts the extension on the new version.
+Each person gets **their own shop's** reports, from whichever Shopee account
+they are logged into. Nothing is shared, and no data is sent anywhere except
+between your browser and Shopee.
 
-If you would rather not grant folder access, replace the files by hand and use
-the same page to confirm the version afterwards.
+---
 
-## Layout
+## Requirements
+
+- Google Chrome 111 or newer
+- A Shopee Seller Centre account (Malaysia)
+
+---
+
+<details>
+<summary><b>How it works</b> — for anyone maintaining the code</summary>
+
+### Layout
 
 ```
 manifest.json
@@ -130,61 +139,63 @@ icons/
 ```
 
 The background worker knows nothing about Shopee's DOM; the content script
-knows nothing about files. One export equals one page load equals one message.
+knows nothing about files.
 
-## Notes for future maintenance
+### Modes
 
-- **Timings are deliberate.** The 15s post-load wait, 5s tab wait and 2s period
-  wait were measured against the real site. Shortening them is the first thing
-  that will break.
-- **By Day and By Week both go through the calendar**, never the period
-  dropdown (that closes the picker) and never a text input. Typing a date into
-  the first visible `input[type=text]` hits Shopee's **Search product** box,
-  which filters the table to nothing and exports an empty sheet. Both open
-  `.bi-date-input`, hover their shortcut, click `.eds-picker-header__prev`
-  index **1** (index 0 is the year arrow), and click a
-  `div.eds-date-table__cell` — Shopee does not use `<td>`.
+**Slow n Steady** navigates one tab through each export in turn, with a 65s
+gap. **Fast n Furious** runs four phases across all tabs — load, set the data
+period, fire every export, then collect — so Shopee builds all seven reports
+concurrently instead of one after another.
+
+Only page loading is parallel. Each tab is still brought to the front to be
+driven, because Chrome throttles timers in background tabs and Shopee's SPA
+cannot keep up otherwise.
+
+### Things that will bite you
+
+- **Timings are deliberate.** The 15s post-load wait was measured against the
+  real site. Shortening it is the first thing that will break.
+- **By Day and By Week go through the calendar**, never the period dropdown
+  (which closes the picker) and never a text input — typing a date into the
+  first visible `input[type=text]` hits Shopee's *Search product* box and
+  exports an empty sheet.
 - **The Latest Reports panel lists OLD reports.** "Is the word Download on the
-  page" is true the moment the panel opens, against a stale row. After clicking
-  Export the extension waits for a *new* row (a processing entry, or a change
-  in the panel's text) before downloading, and scopes the Download click to the
-  panel so it takes the newest entry.
+  page" is true the moment the panel opens. Reports are matched by filename,
+  and the newest row may show the status text "Downloaded" with no button at
+  all — so "first Download button" picks the wrong row.
 - **Panel labels are not filenames.** A row reads
-  `Shop GMV MAX-Detail-Data-29/07/2026-04/08/2026.csv` but the delivered file
-  is `Shop+GMV+MAX-Detail-Data-29_07_2026-04_08_2026.csv` — slashes become
-  underscores, spaces become plus signs. `normalizeShopeeName()` does that
-  conversion; compare names only in normalised form.
-- **GMV Max's `direct_download` endpoint returns a placeholder**
-  `Content-Disposition` of `download.csv`. The real name comes from the list
-  API's `file_name`, so that is preferred whenever the served name matches
-  `GENERIC_NAME_RE`.
-- **The export cooldown is narrower than it looks.** Shopee shows a "wait a
-  minute" toast when the SAME report is re-exported quickly, but exports for
-  different periods do not appear to contend — seven fired within a minute all
-  succeeded. `COOLDOWN_MS` therefore holds two budgets: 65s for Steady, 3s for
-  Furious. The toast is still detected and waited out either way, and as a last
-  backstop a run fails an export if it produces a filename an earlier export
-  already saved — that can only mean an older report was served.
-- **Selectors are Shopee's, not ours.** `button.export` (BI) versus
-  `div.eds-dropdown.export button` (Ads); `span:has-text("Download")` (BI)
-  versus `button:has-text("Download")` (Ads). If Shopee reskins, these are what
-  to re-check first. Text matching is done by an approximation of Playwright's
-  `text=` engine in `queryText()`.
+  `Shop GMV MAX-Detail-Data-29/07/2026-04/08/2026.csv` but the file arrives as
+  `Shop+GMV+MAX-Detail-Data-29_07_2026-04_08_2026.csv`. See
+  `normalizeShopeeName()`.
+- **GMV Max's download endpoint returns a placeholder name** (`download.csv`)
+  and its API entries carry no usable name field, so the panel row is the only
+  reliable source. The job is matched by id, not by name.
+- **`downloads.download({filename})` is only a suggestion.** Another extension
+  listening on `onDeterminingFilename` can override it, which is how files
+  ended up loose in Downloads. Our own saves re-assert their path through the
+  same listener.
+- **Shopee redirects downloads to CDN hosts** that do not look like
+  `shopee.com.my`, so host matching alone misses them.
 - **MV3 service worker lifetime.** The worker dies after ~30s idle, which would
-  kill a 10-minute GMV Max poll. The content script pings every 10s while an
-  export runs; each message resets the idle timer. Do not remove the heartbeat.
+  kill a 10-minute GMV Max poll. The content script pings every 10s; each
+  message resets the timer. Do not remove the heartbeat.
 
-## Testing status
+### Releasing
 
-Verified locally:
+```powershell
+.\tools\make-release.ps1 -Version 1.8.1 -Notes "What changed"
+git add -A; git commit -m "v1.8.1"; git push
+```
 
-- All date arithmetic (folder name, "3 days ago" = today − 2, the By Week
-  Monday − 14 target, and the month-arrow count) against fixed clocks including
-  Sunday, month boundaries and new year.
-- Full 7-export control flow against a mock DOM: tab and period clicks, the By
-  Week hover/arrow/cell sequence, the Ads dropdown and confirm modal, GMV Max
-  API polling, blob capture and filename preservation.
+It rewrites the version in `manifest.json` as text (never a JSON round-trip,
+which collapses single-element arrays) and regenerates `update.json` from the
+files actually on disk.
 
-Not verified: the real `seller.shopee.com.my` selectors and timings — that
-needs a logged-in session. Work through the checklist in the build spec on the
-live site before trusting an unattended run.
+### Testing
+
+`tools/inspect-shopee.js` pasted into DevTools on the Product Performance page
+dumps the selectors and wording the extension depends on — useful when Shopee
+changes its UI.
+
+</details>
