@@ -270,10 +270,23 @@ el.updateAction.addEventListener('click', async () => {
 function renderRealtime(value) {
   el.realtimeDate.value = value || '';
   el.realtimeClear.hidden = !value;
+
+  // Warn BEFORE a run: two exports covering the same day produce the same
+  // filename, so only one file can exist.
+  const clash = exportDefs.find((d) => d.duplicateOf);
+  const twin = clash && exportDefs.find((d) => d.id === clash.duplicateOf);
+
   el.realtimeHint.className = `realtime-hint${value ? ' pinned' : ''}`;
-  el.realtimeHint.textContent = value
-    ? 'Real Time is pinned to this date, not today.'
-    : 'Leave empty for today. Pick an earlier day if you missed last night.';
+  if (clash && twin) {
+    el.realtimeHint.textContent =
+      `Same day as #${twin.id} ${twin.name} — #${clash.id} will be skipped, ` +
+      `you get one file for both.`;
+  } else if (value) {
+    el.realtimeHint.textContent = 'Real Time is pinned to this date, not today.';
+  } else {
+    el.realtimeHint.textContent =
+      'Leave empty for today. Pick an earlier day if you missed last night.';
+  }
 }
 
 async function loadExports() {

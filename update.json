@@ -1,7 +1,7 @@
 {
-    "version":  "1.7.0",
+    "version":  "1.7.1",
     "notes":  [
-                  "Each run now saves into its own sub-folder named with the time, so running twice in a day no longer mixes or overwrites files."
+                  "Fixed: pinning Real Time to a day another report already covers produced six files instead of seven, because both saved under the same name. The duplicate is now skipped and clearly labelled, and the popup warns before you run."
               ],
     "files":  [
                   "background/background.js",

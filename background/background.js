@@ -222,6 +222,27 @@ function dateLabel(span) {
   return from === to ? from : `${from} – ${to}`;
 }
 
+/**
+ * Exports that cover exactly the same day as an earlier one.
+ *
+ * Pinning Real Time to yesterday makes #1 and #2 identical: same period, same
+ * filename, so the second download simply overwrote the first and the run
+ * quietly produced six files instead of seven. Returns { id: firstId }.
+ */
+function duplicateExports(ids, realtimeDate) {
+  const spans = exportDates(new Date(), realtimeDate);
+  const seen = new Map();
+  const dupes = {};
+  for (const id of ids) {
+    const span = spans[id];
+    if (!span) continue; // Ads: Shopee chooses the range, never a known clash
+    const key = `${ymd(span.from)}_${ymd(span.to)}`;
+    if (seen.has(key)) dupes[id] = seen.get(key);
+    else seen.set(key, id);
+  }
+  return dupes;
+}
+
 async function getRealtimeDate() {
   const { realtimeDate } = await chrome.storage.local.get('realtimeDate');
   // A pinned date in the future (or today) is meaningless — treat as unset.
@@ -852,19 +873,42 @@ async function runExports(ids, mode) {
 
   let done = 0;
 
+  // An export covering the same day as an earlier one would download the same
+  // report to the same filename and overwrite it. Mark it and skip it, rather
+  // than spending minutes producing a file that cannot survive.
+  const dupes = duplicateExports(
+    selected.map((ex) => ex.id),
+    state.realtimeDate
+  );
+  for (const [id, firstId] of Object.entries(dupes)) {
+    const first = EXPORTS.find((e) => e.id === firstId);
+    setResult(Number(id), {
+      status: 'done',
+      detail: `Same day as #${firstId} ${first ? first.name : ''} — one file`,
+      filename: ''
+    });
+    done++;
+  }
+  const queue = selected.filter((ex) => !dupes[ex.id]);
+  if (!queue.length) {
+    state.running = false;
+    persist();
+    return { ok: true, done, total: selected.length };
+  }
+
   try {
-    setResult(selected[0].id, { detail: 'Checking Shopee login…' });
+    setResult(queue[0].id, { detail: 'Checking Shopee login…' });
     await checkLogin();
 
     if (state.mode === 'furious') {
       // Phase-by-phase across every tab — see runFurious().
       await closeTabs([state.tabId].filter((id) => id != null));
-      done = await runFurious(selected);
+      done += await runFurious(queue);
     } else {
       // One tab, one export at a time, with the conservative cooldown.
-      for (let i = 0; i < selected.length; i++) {
+      for (let i = 0; i < queue.length; i++) {
         if (state.cancel) throw new AppError(ERR.CANCELLED);
-        const ex = selected[i];
+        const ex = queue[i];
         try {
           await runOne(ex);
           done++;
@@ -874,7 +918,7 @@ async function runExports(ids, mode) {
           setResult(ex.id, { status: 'error', detail: '', error: message });
         }
         state.lastExportAt = Date.now();
-        if (i < selected.length - 1) await respectCooldown(selected[i + 1], state.mode);
+        if (i < queue.length - 1) await respectCooldown(queue[i + 1], state.mode);
       }
     }
   } catch (e) {
@@ -1038,6 +1082,7 @@ async function handle(msg, sender) {
     case 'getExports': {
       const realtimeDate = await getRealtimeDate();
       const spans = exportDates(new Date(), realtimeDate);
+      const dupes = duplicateExports(EXPORTS.map((e) => e.id), realtimeDate);
       return {
         ok: true,
         realtimeDate,
@@ -1045,7 +1090,8 @@ async function handle(msg, sender) {
           id: e.id,
           name: e.name,
           date: dateLabel(spans[e.id]),
-          pinned: !!(spans[e.id] && spans[e.id].pinned)
+          pinned: !!(spans[e.id] && spans[e.id].pinned),
+          duplicateOf: dupes[e.id] || null
         }))
       };
     }
