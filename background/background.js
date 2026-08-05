@@ -128,9 +128,19 @@ function dateFolder(d) {
 /**
  * "03082026-Monday-1338" — one sub-folder per run, so running twice in a day
  * keeps each set of files separate instead of overwriting.
+ *
+ * `day` names the folder (the day the reports are ABOUT) while `at` supplies
+ * the time (when the run actually happened). Those differ when Real Time is
+ * pinned: catching up on Tuesday's reports on Wednesday morning files them
+ * under Tuesday, timed 0823.
  */
-function runFolder(d) {
-  return `${dateFolder(d)}-${pad(d.getHours())}${pad(d.getMinutes())}`;
+function runFolder(day, at) {
+  return `${dateFolder(day)}-${pad(at.getHours())}${pad(at.getMinutes())}`;
+}
+
+/** The day a run's reports are about: the pinned date, else today. */
+function reportDay(now, realtimeDate) {
+  return parseYmd(realtimeDate) || now;
 }
 
 /** Where this run's files go, relative to Downloads. */
@@ -863,8 +873,10 @@ async function runExports(ids, mode) {
   state.startedAt = Date.now();
   state.finishedAt = null;
   const startedAt = new Date();
-  state.folder = dateFolder(startedAt);
-  state.runFolder = runFolder(startedAt);
+  // Named for the day the reports cover, timed by when the run happened.
+  const day = reportDay(startedAt, state.realtimeDate);
+  state.folder = dateFolder(day);
+  state.runFolder = runFolder(day, startedAt);
   state.results = blankResults(ids);
   state.tabIds = [];
   state.tabId = null;
@@ -1086,6 +1098,7 @@ async function handle(msg, sender) {
       return {
         ok: true,
         realtimeDate,
+        folder: dateFolder(reportDay(new Date(), realtimeDate)),
         exports: EXPORTS.map((e) => ({
           id: e.id,
           name: e.name,

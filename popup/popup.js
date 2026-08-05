@@ -34,6 +34,8 @@ const el = {
 };
 
 let exportDefs = [];
+// The folder a run would save into right now — named for the pinned date.
+let targetFolder = '';
 
 async function send(msg) {
   try {
@@ -280,9 +282,9 @@ function renderRealtime(value) {
   if (clash && twin) {
     el.realtimeHint.textContent =
       `Same day as #${twin.id} ${twin.name} — #${clash.id} will be skipped, ` +
-      `you get one file for both.`;
+      `you get one file for both. Saving to ${targetFolder}.`;
   } else if (value) {
-    el.realtimeHint.textContent = 'Real Time is pinned to this date, not today.';
+    el.realtimeHint.textContent = `Saving to ${targetFolder}, not today's folder.`;
   } else {
     el.realtimeHint.textContent =
       'Leave empty for today. Pick an earlier day if you missed last night.';
@@ -292,6 +294,7 @@ function renderRealtime(value) {
 async function loadExports() {
   const res = await send({ type: 'getExports' });
   exportDefs = (res && res.exports) || [];
+  targetFolder = (res && res.folder) || '';
   // Cannot pin to today or later — there would be nothing extra to fetch.
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);

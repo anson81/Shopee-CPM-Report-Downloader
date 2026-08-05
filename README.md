@@ -2,7 +2,7 @@
 
 Manifest V3 Chrome extension. Downloads the 7 daily reports from Shopee Seller
 Center Malaysia into `Downloads/Shopee daily report/DDMMYYYY-DayOfWeek/DDMMYYYY-DayOfWeek-HHMM/`,
-one sub-folder per run so repeat runs in a day never mix,
+one sub-folder per run so repeat runs in a day never mix. When Real Time is pinned to an earlier day, the folder is named for THAT day, not the day you ran it,
 keeping Shopee's original filenames.
 
 On-demand only — no scheduling, no renaming.

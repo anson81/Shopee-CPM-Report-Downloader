@@ -1,7 +1,8 @@
 {
-    "version":  "1.7.1",
+    "version":  "1.8.0",
     "notes":  [
-                  "Fixed: pinning Real Time to a day another report already covers produced six files instead of seven, because both saved under the same name. The duplicate is now skipped and clearly labelled, and the popup warns before you run."
+                  "When Real Time is pinned to an earlier day, the whole run is now filed under that day\u0027s folder instead of the day you ran it. The time in the sub-folder name still records when it actually ran.",
+                  "The popup shows which folder a run will save into."
               ],
     "files":  [
                   "background/background.js",
