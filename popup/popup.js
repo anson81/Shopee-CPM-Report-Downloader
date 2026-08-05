@@ -156,9 +156,11 @@ function render(runState, lastRun) {
   if (lastRun) {
     const mark = lastRun.done === lastRun.total ? '✓' : '✗';
     const how = lastRun.mode === 'furious' ? '🏎' : '🐌';
+    // Show the run's own sub-folder — that is where the files actually are.
+    const where = lastRun.runFolder || lastRun.folder;
     el.lastRun.textContent = `Last run: ${how} ${lastRun.done}/${lastRun.total} ${mark} (${formatWhen(
       lastRun.at
-    )})${lastRun.folder ? ' → ' + lastRun.folder : ''}`;
+    )})${where ? ' → ' + where : ''}`;
   } else {
     el.lastRun.textContent = 'No runs yet.';
   }

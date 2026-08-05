@@ -1,7 +1,8 @@
 # Shopee Report Downloader
 
 Manifest V3 Chrome extension. Downloads the 7 daily reports from Shopee Seller
-Center Malaysia into `Downloads/Shopee daily report/DDMMYYYY-DayOfWeek/`,
+Center Malaysia into `Downloads/Shopee daily report/DDMMYYYY-DayOfWeek/DDMMYYYY-DayOfWeek-HHMM/`,
+one sub-folder per run so repeat runs in a day never mix,
 keeping Shopee's original filenames.
 
 On-demand only — no scheduling, no renaming.

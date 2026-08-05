@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Shopee Report Downloader",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Download all 7 Shopee Seller Center reports with one click",
   "minimum_chrome_version": "111",
   "permissions": [

@@ -1,8 +1,7 @@
 {
-    "version":  "1.6.0",
+    "version":  "1.7.0",
     "notes":  [
-                  "Each report now shows the date it covers, next to its name.",
-                  "Real Time can be pinned to an earlier day, for when you cannot run it late at night. Leave it empty for today."
+                  "Each run now saves into its own sub-folder named with the time, so running twice in a day no longer mixes or overwrites files."
               ],
     "files":  [
                   "background/background.js",

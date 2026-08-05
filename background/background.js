@@ -59,6 +59,7 @@ const state = {
   expectedName: '',
   pendingSavePath: '',
   lastDownloadId: null,
+  runFolder: null, // one sub-folder per run, so repeat runs stay separate
   realtimeDate: '', // Real Time pinned to an earlier day, or '' for today
   error: '',
   results: {},
@@ -122,6 +123,21 @@ function pad(n) {
 function dateFolder(d) {
   const day = d.toLocaleDateString('en-US', { weekday: 'long' });
   return `${pad(d.getDate())}${pad(d.getMonth() + 1)}${d.getFullYear()}-${day}`;
+}
+
+/**
+ * "03082026-Monday-1338" — one sub-folder per run, so running twice in a day
+ * keeps each set of files separate instead of overwriting.
+ */
+function runFolder(d) {
+  return `${dateFolder(d)}-${pad(d.getHours())}${pad(d.getMinutes())}`;
+}
+
+/** Where this run's files go, relative to Downloads. */
+function targetDir() {
+  return state.runFolder
+    ? `${ROOT_FOLDER}/${state.folder}/${state.runFolder}`
+    : `${ROOT_FOLDER}/${state.folder}`;
 }
 
 function ymd(d) {
@@ -325,7 +341,7 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
     state.watch.capturedId = item.id;
     state.watch.capturedName = name;
     suggest({
-      filename: `${ROOT_FOLDER}/${state.folder}/${name}`,
+      filename: `${targetDir()}/${name}`,
       conflictAction: 'overwrite'
     });
   } catch (_) {
@@ -382,7 +398,7 @@ async function saveFile(dataUrl, filename) {
     return { ok: false, error: 'Nothing to save — the captured file was empty.' };
   }
   const name = basename(filename) || 'shopee-report';
-  const path = `${ROOT_FOLDER}/${state.folder}/${name}`;
+  const path = `${targetDir()}/${name}`;
 
   let id;
   try {
@@ -825,7 +841,9 @@ async function runExports(ids, mode) {
   state.error = '';
   state.startedAt = Date.now();
   state.finishedAt = null;
-  state.folder = dateFolder(new Date());
+  const startedAt = new Date();
+  state.folder = dateFolder(startedAt);
+  state.runFolder = runFolder(startedAt);
   state.results = blankResults(ids);
   state.tabIds = [];
   state.tabId = null;
@@ -886,6 +904,7 @@ async function runExports(ids, mode) {
       total,
       mode: state.mode,
       folder: state.folder,
+      runFolder: state.runFolder,
       error: state.error,
       downloadId: state.lastDownloadId,
       results: state.results
