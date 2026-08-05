@@ -1412,10 +1412,16 @@
     } else if (exportDef.key === 'byday_3ago') {
       await selectSpecificDate(params);
     } else if (exportDef.key === 'realtime') {
-      const active = await waitFor(() => queryText(/Real[-\s]?Time/i)[0], {
-        timeout: 5000
-      });
-      if (!active) await selectPeriodBI('Real-Time');
+      if (params.useCalendarDate) {
+        // Pinned to an earlier day: pick it from the calendar rather than
+        // taking Shopee's live Real-Time period.
+        await selectSpecificDate(params);
+      } else {
+        const active = await waitFor(() => queryText(/Real[-\s]?Time/i)[0], {
+          timeout: 5000
+        });
+        if (!active) await selectPeriodBI('Real-Time');
+      }
     } else {
       await selectPeriodBI(exportDef.label);
     }

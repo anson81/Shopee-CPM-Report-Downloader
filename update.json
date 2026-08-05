@@ -1,7 +1,8 @@
 {
-    "version":  "1.5.1",
+    "version":  "1.6.0",
     "notes":  [
-                  "The popup now always has a button in the update bar - Check when you are up to date, Update when there is a new version."
+                  "Each report now shows the date it covers, next to its name.",
+                  "Real Time can be pinned to an earlier day, for when you cannot run it late at night. Leave it empty for today."
               ],
     "files":  [
                   "background/background.js",

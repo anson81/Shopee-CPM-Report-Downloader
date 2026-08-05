@@ -59,6 +59,7 @@ const state = {
   expectedName: '',
   pendingSavePath: '',
   lastDownloadId: null,
+  realtimeDate: '', // Real Time pinned to an earlier day, or '' for today
   error: '',
   results: {},
   // Download watcher, armed by the content script just before it clicks.
@@ -137,6 +138,84 @@ function fallbackBase(ex) {
   return 'Shop+GMV+MAX-Detail-Data';
 }
 
+/* -------------------------------------------------------------------- *
+ * Which day each export covers
+ *
+ * Shown in the popup so it is obvious what a run will fetch, and used to
+ * drive the calendar when Real Time is pinned to a chosen date.
+ * -------------------------------------------------------------------- */
+function addDays(d, n) {
+  const out = new Date(d);
+  out.setDate(d.getDate() + n);
+  return out;
+}
+
+function shortDate(d) {
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
+function parseYmd(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || ''));
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const d = new Date(year, month - 1, day);
+  // Reject anything that rolled over: "2026-13-45" is otherwise happily
+  // turned into a real date, and we would click the wrong day in silence.
+  if (
+    d.getFullYear() !== year ||
+    d.getMonth() !== month - 1 ||
+    d.getDate() !== day
+  ) {
+    return null;
+  }
+  return d;
+}
+
+function mondayOf(d) {
+  const dow = d.getDay(); // 0 = Sunday
+  return addDays(d, -(dow === 0 ? 6 : dow - 1));
+}
+
+/**
+ * The day (or range) each export covers.
+ * `realtimeDate` pins export #1 to a chosen day instead of today.
+ */
+function exportDates(now, realtimeDate) {
+  const pinned = parseYmd(realtimeDate);
+  const realtime = pinned || now;
+  const weekStart = addDays(mondayOf(now), -14);
+
+  return {
+    1: { from: realtime, to: realtime, pinned: !!pinned },
+    2: { from: addDays(now, -1), to: addDays(now, -1) },
+    3: { from: addDays(now, -2), to: addDays(now, -2) },
+    4: { from: addDays(now, -7), to: addDays(now, -1) },
+    5: { from: weekStart, to: addDays(weekStart, 6) },
+    // Shopee picks the Ads range itself — do not claim a date we do not set.
+    6: null,
+    7: null
+  };
+}
+
+function dateLabel(span) {
+  if (!span) return "Shopee's own range";
+  const from = shortDate(span.from);
+  const to = shortDate(span.to);
+  return from === to ? from : `${from} – ${to}`;
+}
+
+async function getRealtimeDate() {
+  const { realtimeDate } = await chrome.storage.local.get('realtimeDate');
+  // A pinned date in the future (or today) is meaningless — treat as unset.
+  const parsed = parseYmd(realtimeDate);
+  if (!parsed) return '';
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return parsed < today ? realtimeDate : '';
+}
+
 /** Whole months from `target` up to `now` — how many times to click the
  *  calendar's month-back arrow. */
 function monthsBetween(now, target) {
@@ -148,9 +227,21 @@ function monthsBetween(now, target) {
   );
 }
 
-function computeParams(ex) {
+function computeParams(ex, realtimeDate) {
   const now = new Date();
   const params = { fallbackBase: fallbackBase(ex) };
+
+  // Real Time pinned to an earlier day: fetch it through the calendar, the
+  // same way By Day does, instead of Shopee's live "Real-Time" period.
+  if (ex.key === 'realtime') {
+    const pinned = parseYmd(realtimeDate);
+    if (pinned) {
+      params.useCalendarDate = true;
+      params.targetDate = ymd(pinned);
+      params.targetDay = pinned.getDate();
+      params.monthsBack = monthsBetween(now, pinned);
+    }
+  }
 
   if (ex.key === 'byday_3ago') {
     // Boss's counting: "3 days ago" == today - 2.
@@ -472,7 +563,7 @@ async function runOne(ex) {
   const res = await sendToContent(tabId, {
     type: 'runExport',
     export: ex,
-    params: computeParams(ex)
+    params: computeParams(ex, state.realtimeDate)
   });
 
   if (!res) throw new AppError(ERR.TAB_GONE);
@@ -501,6 +592,13 @@ function assertNotStale(ex, filename) {
     (r) => r.id !== ex.id && r.status === 'done' && r.filename === filename
   );
   if (!clash) return;
+
+  // Two exports can legitimately share a filename if they cover the same day —
+  // which happens when Real Time is pinned to yesterday, matching export #2.
+  const spans = exportDates(new Date(), state.realtimeDate);
+  const a = spans[ex.id];
+  const b = spans[clash.id];
+  if (a && b && ymd(a.from) === ymd(b.from) && ymd(a.to) === ymd(b.to)) return;
   throw new AppError(
     `Shopee returned the same file as #${clash.id} ${clash.name} ` +
       `("${filename}") instead of a new one — it was probably still rate-limited. ` +
@@ -597,7 +695,7 @@ async function runPhase(slots, phase, label) {
       await sleep(250);
       setResult(slot.ex.id, { detail: label });
 
-      const params = computeParams(slot.ex);
+      const params = computeParams(slot.ex, state.realtimeDate);
       params.initialWaitMs = 2000; // preloadTabs already did the long settle
 
       const res = await sendToContent(slot.tabId, {
@@ -645,7 +743,7 @@ async function runFurious(selected) {
       await sleep(250);
       setResult(slot.ex.id, { detail: 'Downloading…' });
 
-      const params = computeParams(slot.ex);
+      const params = computeParams(slot.ex, state.realtimeDate);
       params.initialWaitMs = 2000;
 
       const res = await sendToContent(slot.tabId, {
@@ -722,6 +820,7 @@ async function runExports(ids, mode) {
 
   state.running = true;
   state.cancel = false;
+  state.realtimeDate = await getRealtimeDate();
   state.mode = mode === 'furious' ? 'furious' : 'steady';
   state.error = '';
   state.startedAt = Date.now();
@@ -917,8 +1016,27 @@ async function checkUpdate(force) {
  * ==================================================================== */
 async function handle(msg, sender) {
   switch (msg.type) {
-    case 'getExports':
-      return { ok: true, exports: EXPORTS.map((e) => ({ id: e.id, name: e.name })) };
+    case 'getExports': {
+      const realtimeDate = await getRealtimeDate();
+      const spans = exportDates(new Date(), realtimeDate);
+      return {
+        ok: true,
+        realtimeDate,
+        exports: EXPORTS.map((e) => ({
+          id: e.id,
+          name: e.name,
+          date: dateLabel(spans[e.id]),
+          pinned: !!(spans[e.id] && spans[e.id].pinned)
+        }))
+      };
+    }
+
+    case 'setRealtimeDate': {
+      const value = parseYmd(msg.date) ? msg.date : '';
+      await chrome.storage.local.set({ realtimeDate: value });
+      state.realtimeDate = await getRealtimeDate();
+      return { ok: true, realtimeDate: state.realtimeDate };
+    }
 
     case 'checkUpdate':
       return checkUpdate(!!msg.force);

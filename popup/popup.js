@@ -27,7 +27,10 @@ const el = {
   updateBar: document.getElementById('update-bar'),
   updateText: document.getElementById('update-text'),
   updateAction: document.getElementById('update-action'),
-  openFolder: document.getElementById('open-folder')
+  openFolder: document.getElementById('open-folder'),
+  realtimeDate: document.getElementById('realtime-date'),
+  realtimeClear: document.getElementById('realtime-clear'),
+  realtimeHint: document.getElementById('realtime-hint')
 };
 
 let exportDefs = [];
@@ -82,7 +85,15 @@ function buildRows(results) {
 
     const name = document.createElement('div');
     name.className = 'name';
-    name.textContent = `#${def.id} ${def.name}`;
+    const title = document.createElement('span');
+    title.textContent = `#${def.id} ${def.name}`;
+    name.appendChild(title);
+    if (def.date) {
+      const when = document.createElement('span');
+      when.className = `when${def.pinned ? ' pinned' : ''}`;
+      when.textContent = def.date;
+      name.appendChild(when);
+    }
 
     const detail = document.createElement('div');
     detail.className = 'detail';
@@ -248,10 +259,46 @@ el.updateAction.addEventListener('click', async () => {
   await checkUpdate(true); // force: ignore the cached answer
 });
 
-(async function init() {
+/* ------------------------------------------------------------------ *
+ * Real Time date
+ *
+ * Normally Real Time means today, which is only partial until the day ends.
+ * Pinning it to an earlier day fetches that whole day instead.
+ * ------------------------------------------------------------------ */
+function renderRealtime(value) {
+  el.realtimeDate.value = value || '';
+  el.realtimeClear.hidden = !value;
+  el.realtimeHint.className = `realtime-hint${value ? ' pinned' : ''}`;
+  el.realtimeHint.textContent = value
+    ? 'Real Time is pinned to this date, not today.'
+    : 'Leave empty for today. Pick an earlier day if you missed last night.';
+}
+
+async function loadExports() {
   const res = await send({ type: 'getExports' });
   exportDefs = (res && res.exports) || [];
+  // Cannot pin to today or later — there would be nothing extra to fetch.
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  el.realtimeDate.max = yesterday.toISOString().slice(0, 10);
+  renderRealtime(res && res.realtimeDate);
   buildPicker();
+}
+
+async function setRealtimeDate(value) {
+  const res = await send({ type: 'setRealtimeDate', date: value });
+  renderRealtime(res && res.realtimeDate);
+  await loadExports(); // date labels move with it
+  await refresh();
+}
+
+el.realtimeDate.addEventListener('change', () =>
+  setRealtimeDate(el.realtimeDate.value)
+);
+el.realtimeClear.addEventListener('click', () => setRealtimeDate(''));
+
+(async function init() {
+  await loadExports();
   await refresh();
   checkUpdate(); // not awaited — never let a slow network hold up the UI
 })();
