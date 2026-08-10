@@ -282,14 +282,27 @@ function mondayOf(d) {
  */
 function exportDates(now, realtimeDate) {
   const pinned = parseYmd(realtimeDate);
-  const realtime = pinned || now;
-  const weekStart = addDays(mondayOf(now), -14);
+  // A pinned date stands in for "today" for the WHOLE run, not just Real Time.
+  // Pin 7 Aug and Yesterday means 6 Aug, By Day means 5 Aug, and so on — which
+  // is what "catch up on that day" has to mean to be any use. Until 1.10.0 only
+  // Real Time moved, so a pinned run mixed one chosen day with four counted
+  // from the real today, and pinning yesterday collided with the Yesterday row.
+  const base = pinned || now;
+  const weekStart = addDays(mondayOf(base), -14);
 
   return {
-    1: { from: realtime, to: realtime, pinned: !!pinned },
-    2: { from: addDays(now, -1), to: addDays(now, -1) },
-    3: { from: addDays(now, -2), to: addDays(now, -2) },
-    4: { from: addDays(now, -7), to: addDays(now, -1) },
+    1: { from: base, to: base, pinned: !!pinned },
+    2: { from: addDays(base, -1), to: addDays(base, -1) },
+    3: { from: addDays(base, -2), to: addDays(base, -2) },
+    // Past 7 Days is a rolling window, and Shopee's calendar cannot select one
+    // for a past date — it offers a single day or a whole Mon–Sun week. So a
+    // pinned run takes the week containing the day before the pinned day. That
+    // is a different span from the seven rolling days this row normally means,
+    // which is why the popup shows each row's actual dates rather than trusting
+    // its name.
+    4: pinned
+      ? { from: mondayOf(addDays(base, -1)), to: addDays(mondayOf(addDays(base, -1)), 6) }
+      : { from: addDays(now, -7), to: addDays(now, -1) },
     5: { from: weekStart, to: addDays(weekStart, 6) },
     // Shopee picks the Ads range itself — do not claim a date we do not set.
     6: null,
@@ -348,40 +361,48 @@ function monthsBetween(now, target) {
 
 function computeParams(ex, realtimeDate) {
   const now = new Date();
+  const pinned = parseYmd(realtimeDate);
+  // Stands in for "today" for every row. See exportDates() for why.
+  const base = pinned || now;
   const params = { fallbackBase: fallbackBase(ex) };
 
-  // Real Time pinned to an earlier day: fetch it through the calendar, the
-  // same way By Day does, instead of Shopee's live "Real-Time" period.
-  if (ex.key === 'realtime') {
-    const pinned = parseYmd(realtimeDate);
-    if (pinned) {
-      params.useCalendarDate = true;
-      params.targetDate = ymd(pinned);
-      params.targetDay = pinned.getDate();
-      params.monthsBack = monthsBetween(now, pinned);
-    }
-  }
-
-  if (ex.key === 'byday_3ago') {
-    // Boss's counting: "3 days ago" == today - 2.
-    const target = new Date(now);
-    target.setDate(now.getDate() - 2);
+  /**
+   * Point the calendar at one day.
+   *
+   * monthsBack is counted from the REAL today, never from `base`: it is the
+   * number of times to press the calendar's prev-month arrow, and the picker
+   * always opens on the real current month.
+   */
+  const pickDay = (target) => {
+    params.useCalendarDate = true;
     params.targetDate = ymd(target);
     params.targetDay = target.getDate();
     params.monthsBack = monthsBetween(now, target);
-  }
+  };
 
-  if (ex.key === 'byweek_last') {
-    const dow = now.getDay(); // 0 = Sunday
-    const daysFromMonday = dow === 0 ? 6 : dow - 1;
-    const currentMonday = new Date(now);
-    currentMonday.setDate(now.getDate() - daysFromMonday);
-    const target = new Date(currentMonday);
-    target.setDate(currentMonday.getDate() - 14); // week before last
-    params.targetDate = ymd(target);
-    params.targetDay = target.getDate();
-    params.monthsBack = monthsBetween(now, target);
-  }
+  /** Point the calendar at the Mon–Sun week containing `target`. */
+  const pickWeek = (target) => {
+    pickDay(target);
+    params.useCalendarDate = false;
+    params.useCalendarWeek = true;
+  };
+
+  // Real Time on a pinned run is fetched through the calendar rather than
+  // Shopee's live "Real-Time" period, which only ever means right now.
+  if (ex.key === 'realtime' && pinned) pickDay(base);
+
+  // Normally this clicks Shopee's own "Yesterday" button, which always means
+  // the real yesterday. A pinned run has to walk the calendar instead.
+  if (ex.key === 'yesterday' && pinned) pickDay(addDays(base, -1));
+
+  // Boss's counting: "3 days ago" == today - 2.
+  if (ex.key === 'byday_3ago') pickDay(addDays(base, -2));
+
+  // Same as Yesterday: Shopee's "Past 7 Days" button is anchored to the real
+  // today, so a pinned run takes the week containing the day before instead.
+  if (ex.key === 'past7d' && pinned) pickWeek(mondayOf(addDays(base, -1)));
+
+  if (ex.key === 'byweek_last') pickWeek(addDays(mondayOf(base), -14));
 
   return params;
 }

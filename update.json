@@ -1,8 +1,10 @@
 {
-    "version":  "1.9.1",
+    "version":  "1.10.0",
     "notes":  [
-                  "Files land in the dated folder again — properly this time. 1.9.0 worked out the right folder for every file and told Chrome about it a fraction too late, so Chrome had already picked its own name and dropped the file in plain Downloads. The answer is now given on the spot rather than a moment afterwards.",
-                  "1.9.0's other change is kept: a run survives Chrome shutting the extension down while it waits on Shopee."
+                  "Picking a date now moves the whole run, not just Real Time. Pick 7 Aug and Yesterday means 6 Aug, By Day means 5 Aug, and By Week shifts with it. Before this, only Real Time moved and every other row still counted back from today.",
+                  "Past 7 Days becomes the whole week around the day before the one you picked. Shopee\u0027s calendar cannot select a rolling seven days for a past date, so a week is the closest it can do. Each row shows its real dates in the popup.",
+                  "Ads Overall and Ads GMV MAX never move. Shopee chooses their date range itself.",
+                  "The \u0027same day as #1\u0027 warning no longer appears when you pick yesterday. With everything shifted, two rows can no longer land on the same day."
               ],
     "files":  [
                   "background/background.js",

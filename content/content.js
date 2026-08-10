@@ -1405,23 +1405,21 @@
 
     await openProductPerformanceTab();
 
-    if (exportDef.key === 'byweek_last') {
-      // Both calendar flows deliberately skip selectPeriodBI — clicking the
-      // period dropdown closes the picker.
+    // Driven by the params, not by which report this is. Any row can need the
+    // calendar now: on a pinned run Yesterday and Past 7 Days cannot use
+    // Shopee's own buttons, because those are anchored to the real today.
+    //
+    // Both calendar flows deliberately skip selectPeriodBI — clicking the
+    // period dropdown closes the picker.
+    if (params.useCalendarWeek) {
       await selectSpecificWeek(params);
-    } else if (exportDef.key === 'byday_3ago') {
+    } else if (params.useCalendarDate) {
       await selectSpecificDate(params);
     } else if (exportDef.key === 'realtime') {
-      if (params.useCalendarDate) {
-        // Pinned to an earlier day: pick it from the calendar rather than
-        // taking Shopee's live Real-Time period.
-        await selectSpecificDate(params);
-      } else {
-        const active = await waitFor(() => queryText(/Real[-\s]?Time/i)[0], {
-          timeout: 5000
-        });
-        if (!active) await selectPeriodBI('Real-Time');
-      }
+      const active = await waitFor(() => queryText(/Real[-\s]?Time/i)[0], {
+        timeout: 5000
+      });
+      if (!active) await selectPeriodBI('Real-Time');
     } else {
       await selectPeriodBI(exportDef.label);
     }
