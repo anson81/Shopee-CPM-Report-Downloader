@@ -143,9 +143,14 @@ async function hydrateRun() {
   }
 }
 
-// Started at module evaluation so a woken worker begins catching up before
-// any event arrives. The download listeners await it before deciding.
-const hydrating = hydrateRun();
+// Started at module evaluation so a woken worker begins catching up before any
+// event arrives. `hydrated` flips once it has settled, which is what lets the
+// filename listener answer synchronously from then on — see the listener for
+// why that distinction decides whether the file lands in the right folder.
+let hydrated = false;
+const hydrating = hydrateRun().then(() => {
+  hydrated = true;
+});
 
 /**
  * A run spends minutes waiting on Shopee, and Chrome stops an idle worker
@@ -404,14 +409,11 @@ const GENERIC_DOWNLOAD_RE =
 
 /**
  * Where this download belongs. Returns a suggestion for Chrome, or null to
- * leave the file alone.
- *
- * Async because a woken worker has to reload the run state first — see
- * hydrateRun(). The listener below returns true so Chrome waits for us.
+ * leave the file alone. Pure and synchronous — it only reads state that is
+ * already in memory.
  */
-async function resolveDownloadPath(item) {
+function decideDownloadPath(item) {
   try {
-    await hydrating;
     if (!state.running || !state.folder) return null; // leave unrelated downloads alone
     const url = item.url || '';
 
@@ -456,11 +458,38 @@ async function resolveDownloadPath(item) {
 }
 
 chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
-  // Returning true is what buys the await above: without it Chrome commits a
-  // filename the moment this listener returns, and a worker that woke for
-  // this very event would never get its run state back in time.
-  resolveDownloadPath(item)
-    .then((choice) => (choice ? suggest(choice) : suggest()))
+  // ANSWER SYNCHRONOUSLY WHENEVER POSSIBLE.
+  //
+  // v1.9.0 made this listener unconditionally async — await hydration, then
+  // suggest. That looked correct and was not. The 10 Aug 19:28 run put every
+  // file in plain Downloads even though the listener matched each one and
+  // captured its download id: an answer that arrives after Chrome has settled
+  // on a filename is the same as no answer at all.
+  //
+  // The SiteGiant twin hid this, because it passes `filename` straight to
+  // downloads.download() and only uses its listener as a backstop. Shopee's
+  // downloads are started by Shopee's own page, so this listener is the only
+  // thing that can place them.
+  //
+  // On a worker that is already awake — which the keep-alive is there to
+  // ensure during a run — hydration has long since settled and everything
+  // needed is in memory, so this is decided before the listener returns.
+  if (hydrated) {
+    const choice = decideDownloadPath(item);
+    if (choice) suggest(choice);
+    else suggest();
+    return;
+  }
+
+  // The only remaining case: a worker woken by this very event with nothing in
+  // memory yet. Answering late is a gamble on Chrome still listening, but
+  // declining outright loses the file for certain.
+  hydrating
+    .then(() => {
+      const choice = decideDownloadPath(item);
+      if (choice) suggest(choice);
+      else suggest();
+    })
     .catch(() => suggest());
   return true;
 });

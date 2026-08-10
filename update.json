@@ -1,8 +1,8 @@
 {
-    "version":  "1.9.0",
+    "version":  "1.9.1",
     "notes":  [
-                  "Files land in the dated folder again. Chrome shuts the extension down while a run waits on Shopee, and everything it knew about the run went with it — so the downloads that arrived afterwards escaped into plain Downloads under Chrome's own names.",
-                  "The run now keeps a copy of what it is doing that survives being shut down, holds itself awake while a run is in flight, and makes Chrome wait for that answer before it picks a filename."
+                  "Files land in the dated folder again — properly this time. 1.9.0 worked out the right folder for every file and told Chrome about it a fraction too late, so Chrome had already picked its own name and dropped the file in plain Downloads. The answer is now given on the spot rather than a moment afterwards.",
+                  "1.9.0's other change is kept: a run survives Chrome shutting the extension down while it waits on Shopee."
               ],
     "files":  [
                   "background/background.js",
