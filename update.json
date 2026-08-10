@@ -1,7 +1,8 @@
 {
-    "version":  "1.8.1",
+    "version":  "1.9.0",
     "notes":  [
-                  "Rewrote the README for people installing it, with the download link and simple steps first. Technical notes moved into a collapsed section."
+                  "Files land in the dated folder again. Chrome shuts the extension down while a run waits on Shopee, and everything it knew about the run went with it — so the downloads that arrived afterwards escaped into plain Downloads under Chrome's own names.",
+                  "The run now keeps a copy of what it is doing that survives being shut down, holds itself awake while a run is in flight, and makes Chrome wait for that answer before it picks a filename."
               ],
     "files":  [
                   "background/background.js",

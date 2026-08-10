@@ -100,6 +100,73 @@ function persist() {
   chrome.storage.local.set({ runState: publicState() }).catch(() => {});
 }
 
+/* -------------------------------------------------------------------- *
+ * Run state that has to outlive the service worker
+ *
+ * MV3 shuts an idle worker down, and everything in `state` goes with it. The
+ * download listeners then see running:false and wave the file through into
+ * plain Downloads — which is exactly what was happening: the popup reported
+ * the right folder name while the files landed loose in Downloads under
+ * Chrome's own names.
+ *
+ * storage.session keeps this in memory across worker restarts without
+ * touching disk, and Chrome clears it on exit.
+ * -------------------------------------------------------------------- */
+const RUN_KEYS = [
+  'running',
+  'folder',
+  'runFolder',
+  'expectedName',
+  'pendingSavePath',
+  'watch'
+];
+
+function persistRun() {
+  const snap = {};
+  for (const key of RUN_KEYS) snap[key] = state[key];
+  return chrome.storage.session.set({ runtimeState: snap }).catch(() => {});
+}
+
+/**
+ * Refills the run fields after a worker restart.
+ *
+ * A worker that is already running its own run always wins — this only fills
+ * in what a restart wiped.
+ */
+async function hydrateRun() {
+  if (state.running) return;
+  try {
+    const { runtimeState } = await chrome.storage.session.get('runtimeState');
+    if (runtimeState && runtimeState.running) Object.assign(state, runtimeState);
+  } catch (_) {
+    /* nothing worth restoring */
+  }
+}
+
+// Started at module evaluation so a woken worker begins catching up before
+// any event arrives. The download listeners await it before deciding.
+const hydrating = hydrateRun();
+
+/**
+ * A run spends minutes waiting on Shopee, and Chrome stops an idle worker
+ * after about 30 seconds. Any extension API call resets that timer, so a
+ * heartbeat keeps the worker — and the download routing — alive for the whole
+ * run. hydrateRun() is the safety net for when this is not enough.
+ */
+let keepAliveTimer = null;
+
+function startKeepAlive() {
+  if (keepAliveTimer) return;
+  keepAliveTimer = setInterval(() => {
+    chrome.runtime.getPlatformInfo().catch(() => {});
+  }, 20000);
+}
+
+function stopKeepAlive() {
+  if (keepAliveTimer) clearInterval(keepAliveTimer);
+  keepAliveTimer = null;
+}
+
 function setResult(id, patch) {
   const row = state.results[id];
   if (!row) return;
@@ -335,9 +402,17 @@ const SHOPEE_HOST_RE = /shopee|susercontent|shopeemobile/i;
 const GENERIC_DOWNLOAD_RE =
   /^(download|attachment|file|export|report)(\s*\(\d+\))?\.(?:xlsx|xls|csv|zip)$/i;
 
-chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+/**
+ * Where this download belongs. Returns a suggestion for Chrome, or null to
+ * leave the file alone.
+ *
+ * Async because a woken worker has to reload the run state first — see
+ * hydrateRun(). The listener below returns true so Chrome waits for us.
+ */
+async function resolveDownloadPath(item) {
   try {
-    if (!state.running || !state.folder) return; // leave unrelated downloads alone
+    await hydrating;
+    if (!state.running || !state.folder) return null; // leave unrelated downloads alone
     const url = item.url || '';
 
     // Our own saveFile download. The `filename` passed to downloads.download()
@@ -345,10 +420,9 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
     // can override, and something on this machine was overriding it, dropping
     // the file into plain Downloads. Re-assert the path here.
     if (url.startsWith('data:')) {
-      if (state.pendingSavePath) {
-        suggest({ filename: state.pendingSavePath, conflictAction: 'overwrite' });
-      }
-      return;
+      return state.pendingSavePath
+        ? { filename: state.pendingSavePath, conflictAction: 'overwrite' }
+        : null;
     }
 
     const haystack = [item.url, item.finalUrl, item.referrer]
@@ -362,7 +436,7 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
     // placeholder name while we are mid-collect — never for a download that
     // already has a real name of its own.
     if (!SHOPEE_HOST_RE.test(haystack) && !(placeholder && state.expectedName)) {
-      return;
+      return null;
     }
 
     // "download (2).csv" tells us nothing; the content script knows what this
@@ -371,19 +445,31 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
 
     state.watch.capturedId = item.id;
     state.watch.capturedName = name;
-    suggest({
+    persistRun();
+    return {
       filename: `${targetDir()}/${name}`,
       conflictAction: 'overwrite'
-    });
+    };
   } catch (_) {
-    /* fall through to Chrome's default filename */
+    return null; // fall through to Chrome's default filename
   }
+}
+
+chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+  // Returning true is what buys the await above: without it Chrome commits a
+  // filename the moment this listener returns, and a worker that woke for
+  // this very event would never get its run state back in time.
+  resolveDownloadPath(item)
+    .then((choice) => (choice ? suggest(choice) : suggest()))
+    .catch(() => suggest());
+  return true;
 });
 
 // Backstop: if another extension wins onDeterminingFilename, we still notice
 // that a Shopee download happened and skip the blob fallback.
-chrome.downloads.onCreated.addListener((item) => {
+chrome.downloads.onCreated.addListener(async (item) => {
   try {
+    await hydrating;
     if (!state.running || state.watch.capturedId != null) return;
     const url = item.url || '';
     if (url.startsWith('data:')) return;
@@ -391,6 +477,7 @@ chrome.downloads.onCreated.addListener((item) => {
     if (!SHOPEE_HOST_RE.test(haystack)) return;
     state.watch.capturedId = item.id;
     state.watch.capturedName = basename(item.filename) || 'shopee-report';
+    persistRun();
   } catch (_) {
     /* ignore */
   }
@@ -436,6 +523,7 @@ async function saveFile(dataUrl, filename) {
     // Also published for our onDeterminingFilename listener to re-assert, in
     // case another extension overrides the filename we ask for here.
     state.pendingSavePath = path;
+    await persistRun();
     id = await chrome.downloads.download({
       url: dataUrl,
       filename: path,
@@ -444,6 +532,7 @@ async function saveFile(dataUrl, filename) {
     });
   } catch (e) {
     state.pendingSavePath = '';
+    persistRun();
     return {
       ok: false,
       error: `Chrome refused to save "${name}": ${e && e.message ? e.message : e}`
@@ -452,6 +541,7 @@ async function saveFile(dataUrl, filename) {
     // Cleared after a beat: the event fires just after download() resolves.
     setTimeout(() => {
       state.pendingSavePath = '';
+      persistRun();
     }, 5000);
   }
 
@@ -600,6 +690,7 @@ async function runOne(ex) {
   state.currentId = ex.id;
   state.watch = { armed: false, capturedId: null, capturedName: '' };
   state.expectedName = ''; // never let one export's name land on another's file
+  persistRun();
   setResult(ex.id, { status: 'running', detail: 'Opening page…', error: '' });
 
   const tabId = await ensureTab();
@@ -784,7 +875,8 @@ async function runFurious(selected) {
     if (state.cancel) throw new AppError(ERR.CANCELLED);
     state.currentId = slot.ex.id;
     state.watch = { armed: false, capturedId: null, capturedName: '' };
-  state.expectedName = ''; // never let one export's name land on another's file
+    state.expectedName = ''; // never let one export's name land on another's file
+    persistRun();
     try {
       await chrome.tabs.update(slot.tabId, { active: true });
       await sleep(250);
@@ -881,6 +973,8 @@ async function runExports(ids, mode) {
   state.tabIds = [];
   state.tabId = null;
   persist();
+  persistRun();
+  startKeepAlive();
   setBadge('…', '#ee4d2d');
 
   let done = 0;
@@ -905,6 +999,8 @@ async function runExports(ids, mode) {
   if (!queue.length) {
     state.running = false;
     persist();
+    persistRun();
+    stopKeepAlive();
     return { ok: true, done, total: selected.length };
   }
 
@@ -951,6 +1047,8 @@ async function runExports(ids, mode) {
   state.currentId = null;
   state.finishedAt = Date.now();
   persist();
+  persistRun();
+  stopKeepAlive();
 
   const total = selected.length;
   await chrome.storage.local.set({
@@ -1160,12 +1258,17 @@ async function handle(msg, sender) {
 
     case 'armDownload':
       state.watch = { armed: true, capturedId: null, capturedName: '' };
+      // Awaited, not fired and forgotten: the click that triggers the download
+      // comes immediately after this reply, and the filename listener may be
+      // reading this back from a worker that restarted in between.
+      await persistRun();
       return { ok: true };
 
     // The content script has read the report's real name off the page; use it
     // to rescue any download Chrome would otherwise call "download (2).csv".
     case 'expectName':
       state.expectedName = basename(msg.name || '') || '';
+      await persistRun();
       return { ok: true };
 
     case 'checkDownload':
