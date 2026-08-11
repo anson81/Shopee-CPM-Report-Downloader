@@ -12,6 +12,9 @@
 
 const BI_URL = 'https://seller.shopee.com.my/datacenter/product/overview';
 const ADS_URL = 'https://seller.shopee.com.my/portal/marketing/pas/index';
+const ORDER_URL = 'https://seller.shopee.com.my/portal/sale/order';
+const REPORTS_URL =
+  'https://seller.shopee.com.my/portal/settings/shop/reports/order';
 const LOGIN_URL = 'https://seller.shopee.com.my/datacenter/overview';
 const ROOT_FOLDER = 'Shopee daily report';
 
@@ -22,7 +25,26 @@ const EXPORTS = [
   { id: 4, key: 'past7d', name: 'Past 7 Days', label: 'Past 7 Days', kind: 'bi', url: BI_URL },
   { id: 5, key: 'byweek_last', name: 'By Week (last week)', label: 'By Week', kind: 'bi', url: BI_URL },
   { id: 6, key: 'overall', name: 'Ads Overall', label: 'Overall', kind: 'ads', url: ADS_URL },
-  { id: 7, key: 'gmv_max', name: 'Ads GMV MAX', label: 'GMV Max', kind: 'ads', url: ADS_URL }
+  { id: 7, key: 'gmv_max', name: 'Ads GMV MAX', label: 'GMV Max', kind: 'ads', url: ADS_URL },
+  { id: 8, key: 'past30d', name: 'Past 30 Days', label: 'Past 30 Days', kind: 'bi', url: BI_URL },
+  {
+    id: 9,
+    key: 'orders_30d',
+    name: 'Orders (last 30 days)',
+    label: 'Orders',
+    kind: 'order',
+    block: 'recent',
+    url: ORDER_URL
+  },
+  {
+    id: 10,
+    key: 'orders_prev30d',
+    name: 'Orders (previous 30 days)',
+    label: 'Orders',
+    kind: 'order',
+    block: 'previous',
+    url: ORDER_URL
+  }
 ];
 
 const ERR = {
@@ -187,10 +209,6 @@ function setBadge(text, color) {
 /* ==================================================================== *
  * Dates & paths
  * ==================================================================== */
-function pad(n) {
-  return String(n).padStart(2, '0');
-}
-
 /** "03082026-Monday" */
 function dateFolder(d) {
   const day = d.toLocaleDateString('en-US', { weekday: 'long' });
@@ -222,15 +240,12 @@ function targetDir() {
     : `${ROOT_FOLDER}/${state.folder}`;
 }
 
-function ymd(d) {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
 function basename(p) {
   return String(p || '').split(/[\\/]/).pop();
 }
 
 function fallbackBase(ex) {
+  if (ex.kind === 'order') return 'Order.all';
   if (ex.kind === 'bi') return 'parentskudetail';
   if (ex.key === 'overall') return 'Shopee-Ads-Overall-Data';
   return 'Shop+GMV+MAX-Detail-Data';
@@ -242,6 +257,31 @@ function fallbackBase(ex) {
  * Shown in the popup so it is obvious what a run will fetch, and used to
  * drive the calendar when Real Time is pinned to a chosen date.
  * -------------------------------------------------------------------- */
+/* PURE-DATES-START */
+/* Everything between these markers must stay pure: no `chrome`, no `state`,
+ * no DOM. tools/test-dates.js slices this region out and runs it standalone,
+ * because a bug in here produces files named for days they do not contain —
+ * which looks perfectly fine until someone acts on the numbers. */
+
+function pad(n) {
+  return String(n).padStart(2, '0');
+}
+
+function ymd(d) {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** Whole months from `target` up to `now` — how many times to click the
+ *  calendar's month-back arrow. */
+function monthsBetween(now, target) {
+  return Math.max(
+    0,
+    now.getFullYear() * 12 +
+      now.getMonth() -
+      (target.getFullYear() * 12 + target.getMonth())
+  );
+}
+
 function addDays(d, n) {
   const out = new Date(d);
   out.setDate(d.getDate() + n);
@@ -316,6 +356,7 @@ function exportDates(now, realtimeDate) {
   // altogether. Anchoring to Past 7 Days keeps the two rows adjacent — no gap,
   // and no near-duplicate either, which is what the two-week step was avoiding.
   const weekStart = addDays(mondayOf(p7.from), -7);
+  const blocks = orderBlocks(now, realtimeDate);
 
   return {
     1: { from: base, to: base, pinned: !!pinned },
@@ -325,8 +366,57 @@ function exportDates(now, realtimeDate) {
     5: { from: weekStart, to: addDays(weekStart, 6) },
     // Shopee picks the Ads range itself — do not claim a date we do not set.
     6: null,
-    7: null
+    7: null,
+    // Same reasoning for Past 30 Days: it is Shopee's own rolling button.
+    8: null,
+    9: blocks.recent,
+    10: blocks.previous
   };
+}
+
+/**
+ * The two 30-day windows the Orders exports cover.
+ *
+ * They end the day BEFORE the run, so a part-finished day is never exported,
+ * and they sit back to back: no day counted twice, no gap between them.
+ *
+ * Shopee caps an order export at 60 days — confirmed on the live picker on
+ * 11 Aug 2026, where selecting 12 Jun as the start disabled 11 Aug and left
+ * 10 Aug as the last selectable end. Two 30-day blocks are exactly that cap,
+ * so neither can be widened without splitting the export in two.
+ */
+function orderBlocks(now, realtimeDate) {
+  const base = parseYmd(realtimeDate) || now;
+  const recentTo = addDays(base, -1);
+  const recentFrom = addDays(recentTo, -29);
+  const previousTo = addDays(recentFrom, -1);
+  const previousFrom = addDays(previousTo, -29);
+  return {
+    recent: { from: recentFrom, to: recentTo },
+    previous: { from: previousFrom, to: previousTo }
+  };
+}
+
+/**
+ * Shopee's own name for an order export: Order.all.20260712_20260810.xlsx
+ *
+ * Knowing this before we ask is what makes collection safe. My Reports keeps
+ * six months of exports, so "the newest row" is a guess; an exact filename is
+ * not.
+ */
+function orderFilename(span) {
+  const compact = (d) =>
+    `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
+  return `Order.all.${compact(span.from)}_${compact(span.to)}.xlsx`;
+}
+
+/** How the export modal renders a range: "2026/07/12 – 2026/08/10". Read back
+ *  after we set it, so a mis-clicked cell cannot export a range nobody asked
+ *  for under a filename that looks plausible. */
+function orderRangeText(span) {
+  const slash = (d) =>
+    `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
+  return `${slash(span.from)} – ${slash(span.to)}`;
 }
 
 function dateLabel(span) {
@@ -335,6 +425,8 @@ function dateLabel(span) {
   const to = shortDate(span.to);
   return from === to ? from : `${from} – ${to}`;
 }
+
+/* PURE-DATES-END */
 
 /**
  * Exports that cover exactly the same day as an earlier one.
@@ -365,17 +457,6 @@ async function getRealtimeDate() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return parsed < today ? realtimeDate : '';
-}
-
-/** Whole months from `target` up to `now` — how many times to click the
- *  calendar's month-back arrow. */
-function monthsBetween(now, target) {
-  return Math.max(
-    0,
-    now.getFullYear() * 12 +
-      now.getMonth() -
-      (target.getFullYear() * 12 + target.getMonth())
-  );
 }
 
 function computeParams(ex, realtimeDate) {
@@ -433,6 +514,16 @@ function computeParams(ex, realtimeDate) {
 
   // The week immediately before Past 7 Days. See exportDates().
   if (ex.key === 'byweek_last') pickWeek(addDays(mondayOf(p7.from), -7));
+
+  // Orders: which block this export covers, and the exact filename Shopee
+  // will publish for it. See orderFilename() for why the name matters.
+  if (ex.kind === 'order') {
+    const span = orderBlocks(now, realtimeDate)[ex.block];
+    params.orderFrom = span.from.getTime();
+    params.orderTo = span.to.getTime();
+    params.orderRangeText = orderRangeText(span);
+    params.expectedName = orderFilename(span);
+  }
 
   return params;
 }
@@ -762,6 +853,80 @@ async function checkLogin() {
   if (!res || !res.ok || !res.loggedIn) throw new AppError(ERR.NOT_LOGGED_IN);
 }
 
+/* -------------------------------------------------------------------- *
+ * Orders: queued now, collected later
+ *
+ * The other eight reports download while you watch. An order export does not:
+ * clicking Export queues a job on Shopee's side and the file appears in My
+ * Reports some minutes later, under a name that encodes the date range.
+ *
+ * So a run queues both blocks up front, does everything else while Shopee
+ * builds them, and comes back at the end. The waiting costs almost nothing
+ * because it overlaps with the other downloads.
+ * -------------------------------------------------------------------- */
+const ORDER_POLL_MS = 15000;
+const ORDER_TIMEOUT_MS = 600000; // 10 min — the same patience GMV Max gets
+
+async function queueOrderExport(ex) {
+  setResult(ex.id, { status: 'running', detail: 'Opening the Orders page…' });
+  const tabId = await ensureTab();
+  await navigate(tabId, ORDER_URL);
+  await waitForContentScript(tabId);
+
+  const params = computeParams(ex, state.realtimeDate);
+  await sendToContent(tabId, { type: 'prepareOrderExport', params });
+
+  setResult(ex.id, { detail: `Requesting ${params.orderRangeText}…` });
+  const res = await sendToContent(tabId, { type: 'triggerOrderExport', params });
+  if (!res) throw new AppError(ERR.TAB_GONE);
+  if (res.cancelled) throw new AppError(ERR.CANCELLED);
+  if (!res.ok) {
+    throw new AppError(res.error || 'Could not request the orders export.');
+  }
+
+  setResult(ex.id, { detail: 'Generating on Shopee…' });
+}
+
+async function collectOrderExport(ex) {
+  const params = computeParams(ex, state.realtimeDate);
+  const deadline = Date.now() + ORDER_TIMEOUT_MS;
+
+  state.watch = { armed: false, capturedId: null, capturedName: '' };
+  state.expectedName = params.expectedName;
+  persistRun();
+
+  const tabId = await ensureTab();
+  for (;;) {
+    if (state.cancel) throw new AppError(ERR.CANCELLED);
+    setResult(ex.id, { detail: `Waiting for ${params.expectedName}…` });
+
+    await navigate(tabId, REPORTS_URL);
+    await waitForContentScript(tabId);
+    const found = await sendToContent(tabId, { type: 'findOrderReport', params });
+    if (found && found.ok && found.found) break;
+
+    if (Date.now() > deadline) {
+      throw new AppError(
+        `Shopee did not finish ${params.expectedName} within 10 minutes. ` +
+          'It may still be building — open My Reports later and download it ' +
+          'by hand, or re-run this export on its own.'
+      );
+    }
+    await sleep(ORDER_POLL_MS);
+  }
+
+  setResult(ex.id, { detail: 'Downloading…' });
+  const res = await sendToContent(tabId, { type: 'downloadOrderReport', params });
+  if (!res) throw new AppError(ERR.TAB_GONE);
+  if (res.cancelled) throw new AppError(ERR.CANCELLED);
+  if (!res.ok) {
+    throw new AppError(res.error || 'Could not download the orders report.');
+  }
+
+  const name = await confirmDownload(res);
+  setResult(ex.id, { status: 'done', filename: name, detail: name });
+}
+
 /**
  * Slow n Steady: navigate the one tab, then run all three phases of the
  * export in a single content-script call.
@@ -1084,19 +1249,40 @@ async function runExports(ids, mode) {
     return { ok: true, done, total: selected.length };
   }
 
+  // Orders are asynchronous, so they sit outside the normal machinery: queued
+  // before everything else, collected after it. See queueOrderExport().
+  const orders = queue.filter((ex) => ex.kind === 'order');
+  const rest = queue.filter((ex) => ex.kind !== 'order');
+  const queued = [];
+
   try {
     setResult(queue[0].id, { detail: 'Checking Shopee login…' });
     await checkLogin();
 
+    // One at a time: two export requests seconds apart risk the same rate
+    // limit that already bites the BI exports.
+    for (const ex of orders) {
+      if (state.cancel) throw new AppError(ERR.CANCELLED);
+      try {
+        await queueOrderExport(ex);
+        queued.push(ex);
+        await sleep(5000);
+      } catch (e) {
+        const message = e && e.message ? e.message : String(e);
+        if (message === ERR.NOT_LOGGED_IN || message === ERR.CANCELLED) throw e;
+        setResult(ex.id, { status: 'error', detail: '', error: message });
+      }
+    }
+
     if (state.mode === 'furious') {
       // Phase-by-phase across every tab — see runFurious().
       await closeTabs([state.tabId].filter((id) => id != null));
-      done += await runFurious(queue);
+      if (rest.length) done += await runFurious(rest);
     } else {
       // One tab, one export at a time, with the conservative cooldown.
-      for (let i = 0; i < queue.length; i++) {
+      for (let i = 0; i < rest.length; i++) {
         if (state.cancel) throw new AppError(ERR.CANCELLED);
-        const ex = queue[i];
+        const ex = rest[i];
         try {
           await runOne(ex);
           done++;
@@ -1106,7 +1292,21 @@ async function runExports(ids, mode) {
           setResult(ex.id, { status: 'error', detail: '', error: message });
         }
         state.lastExportAt = Date.now();
-        if (i < queue.length - 1) await respectCooldown(queue[i + 1], state.mode);
+        if (i < rest.length - 1) await respectCooldown(rest[i + 1], state.mode);
+      }
+    }
+
+    // Shopee has had the whole run to build these.
+    for (const ex of queued) {
+      if (state.cancel) throw new AppError(ERR.CANCELLED);
+      state.currentId = ex.id;
+      try {
+        await collectOrderExport(ex);
+        done++;
+      } catch (e) {
+        const message = e && e.message ? e.message : String(e);
+        if (message === ERR.CANCELLED) throw e;
+        setResult(ex.id, { status: 'error', detail: '', error: message });
       }
     }
   } catch (e) {

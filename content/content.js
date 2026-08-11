@@ -1362,6 +1362,267 @@
   }
 
   /* ================================================================== *
+   * Orders page — kind: 'order'
+   *
+   * Read off the live page on 2026-08-11:
+   *   - /portal/sale/order opens on the "All" tab already
+   *   - Export opens a modal headed "Export All Orders"
+   *   - the Date Range box is a DIV, not an input — it cannot be typed into,
+   *     so the range has to be set by clicking calendar cells
+   *   - the picker is the same EDS component the By Week calendar drives
+   *   - Shopee refuses a range wider than 60 days
+   *   - the finished file lands in My Reports as Order.all.<from>_<to>.xlsx
+   * ================================================================== */
+  const MONTH_NAMES = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+
+  const ORDER_ERR = {
+    NO_EXPORT:
+      "Could not find the Export button on the Orders page. Shopee's UI may have changed.",
+    NO_MODAL:
+      "The 'Export All Orders' window did not open. Shopee's UI may have changed.",
+    NO_CALENDAR: 'Could not open the date range calendar on the Orders page.',
+    NO_REPORT_ROW: 'Could not find the finished orders report in My Reports.',
+    NO_DOWNLOAD_BUTTON:
+      "Found the orders report but not its Download button. Shopee's UI may have changed."
+  };
+
+  /** The modal, found by its heading rather than a class that may change. */
+  function orderModal() {
+    const nodes = $$vis('.eds-modal, .eds-modal__box, [role="dialog"]');
+    return nodes.find((n) => /Export All Orders/i.test(n.innerText || '')) || null;
+  }
+
+  /** The Date Range box. Displays text; it is not an input. */
+  function orderRangeBox() {
+    return $$vis('.eds-date-picker__input')[0] || null;
+  }
+
+  function orderRangeValue() {
+    const box = orderRangeBox();
+    return box ? squash(box.innerText) : '';
+  }
+
+  /** { month: 0-11, year } for one calendar panel, read from its header. */
+  function panelMonth(panel) {
+    const header = panel.querySelector('.eds-picker-header');
+    const text = squash(header ? header.innerText : '');
+    const month = MONTH_NAMES.findIndex((name) => new RegExp(name, 'i').test(text));
+    const year = (text.match(/(20\d{2})/) || [])[1];
+    if (month < 0 || !year) return null;
+    return { month, year: Number(year) };
+  }
+
+  function orderPanels() {
+    return $$vis('.eds-date-picker-panel__date');
+  }
+
+  /**
+   * Walk one calendar panel to the month we want.
+   *
+   * Re-reads the header after every press rather than counting a fixed number
+   * of clicks, so a panel that starts somewhere unexpected still lands right.
+   */
+  async function goToMonth(panelIndex, target) {
+    const want = target.getFullYear() * 12 + target.getMonth();
+    for (let attempt = 0; attempt < 30; attempt++) {
+      checkCancel();
+      const panel = orderPanels()[panelIndex];
+      if (!panel) throw new AppError(ORDER_ERR.NO_CALENDAR);
+      const at = panelMonth(panel);
+      if (!at) throw new AppError(ORDER_ERR.NO_CALENDAR);
+      const have = at.year * 12 + at.month;
+      if (have === want) return panel;
+
+      const arrow = panel.querySelector(
+        have > want ? '.eds-picker-header__prev' : '.eds-picker-header__next'
+      );
+      if (!arrow) throw new AppError(ORDER_ERR.NO_CALENDAR);
+      fullClick(arrow);
+      await wait(300);
+    }
+    const name = `${MONTH_NAMES[target.getMonth()]} ${target.getFullYear()}`;
+    throw new AppError(
+      `Could not reach ${name} in the Orders calendar. Export it manually and re-run.`
+    );
+  }
+
+  /** Click a day inside one panel. Panels only ever list their own month. */
+  async function clickDayCell(panel, day) {
+    const cell = $$('.eds-date-table__cell', panel)
+      .filter(isVisible)
+      .find(
+        (c) => squash(c.innerText) === String(day) && !/disabled/.test(c.className)
+      );
+    if (!cell) {
+      throw new AppError(
+        `Day ${day} is not selectable in the Orders calendar. The range may be ` +
+          'wider than the 60 days Shopee allows.'
+      );
+    }
+    fullClick(cell);
+    await wait(400);
+  }
+
+  /**
+   * Set the range, then read the box back.
+   *
+   * The read-back is the whole safety net. A mis-clicked cell would otherwise
+   * export a range nobody asked for, under a filename that looks entirely
+   * plausible — and nothing downstream would ever question it.
+   */
+  async function setOrderRange(params) {
+    const from = new Date(params.orderFrom);
+    const to = new Date(params.orderTo);
+
+    report('Opening the date range…');
+    const box = await waitFor(() => orderRangeBox(), { timeout: 10000 });
+    if (!box) throw new AppError(ORDER_ERR.NO_CALENDAR);
+    fullClick(box);
+    await wait(800);
+    if (!orderPanels().length) throw new AppError(ORDER_ERR.NO_CALENDAR);
+
+    report(`Picking ${params.orderRangeText}…`);
+    const startPanel = await goToMonth(0, from);
+    await clickDayCell(startPanel, from.getDate());
+
+    // Choosing a start can shift both panels, so locate the end month fresh.
+    const panels = orderPanels();
+    const endWant = to.getFullYear() * 12 + to.getMonth();
+    let endIndex = panels.findIndex((p) => {
+      const at = panelMonth(p);
+      return at && at.year * 12 + at.month === endWant;
+    });
+    if (endIndex < 0) endIndex = panels.length - 1;
+    const endPanel = await goToMonth(endIndex, to);
+    await clickDayCell(endPanel, to.getDate());
+    await wait(600);
+
+    // Shopee renders an en dash; normalise both sides before comparing.
+    const flat = (s) => String(s).replace(/[–—-]/g, '-').replace(/\s+/g, '');
+    const got = orderRangeValue();
+    if (flat(got) !== flat(params.orderRangeText)) {
+      throw new AppError(
+        `The date range did not take: wanted ${params.orderRangeText}, the box ` +
+          `reads "${got}". Nothing was exported.`
+      );
+    }
+    report(`Range set to ${params.orderRangeText}.`);
+  }
+
+  /** Phase 1 — make sure the All tab is showing. */
+  async function prepareOrderExport(params) {
+    report('Waiting for the Orders page…');
+    await wait(spaWait(params));
+
+    const all = queryText(/^All$/i).filter(
+      (el) => squash(el.textContent).length <= 4
+    )[0];
+    if (all) {
+      fullClick(all);
+      await wait(1500);
+    }
+    report('Orders page ready.');
+    return { ok: true, prepared: true };
+  }
+
+  /** Phase 2 — queue the export. Deliberately does not wait for the file. */
+  async function triggerOrderExport(params) {
+    report('Opening Export…');
+    const button = await waitFor(
+      () => {
+        const buttons = $$vis('button').filter(
+          (b) => squash(b.innerText) === 'Export'
+        );
+        return (
+          buttons.find((b) => /export-with-modal/.test(b.className)) ||
+          buttons[0] ||
+          null
+        );
+      },
+      { timeout: 15000 }
+    );
+    if (!button) throw new AppError(ORDER_ERR.NO_EXPORT);
+    fullClick(button);
+    await wait(1200);
+
+    if (!(await waitFor(() => orderModal(), { timeout: 10000 }))) {
+      throw new AppError(ORDER_ERR.NO_MODAL);
+    }
+
+    await setOrderRange(params);
+
+    report('Requesting the export…');
+    const modal = orderModal();
+    const submit = $$('button', modal)
+      .filter(isVisible)
+      .find(
+        (b) =>
+          squash(b.innerText) === 'Export' &&
+          /eds-button--primary/.test(b.className)
+      );
+    if (!submit) throw new AppError(ORDER_ERR.NO_EXPORT);
+    fullClick(submit);
+    await wait(3000);
+
+    report('Export requested — Shopee is building it.');
+    return { ok: true, triggered: true };
+  }
+
+  /**
+   * Rows on /portal/settings/shop/reports/order.
+   *
+   * Columns are Report Type, Request Time, Request Account, Report name,
+   * Action. The report name carries its own date range, and Download is a
+   * <button> with no href — the file arrives through JS, which the MAIN-world
+   * interceptor already watches for.
+   */
+  function orderReportRows() {
+    return $$('tr')
+      .map((tr) => {
+        const cells = [...tr.children].map((td) => squash(td.innerText));
+        const name = cells.find((t) => /^Order\.[\w.]+\.\d{8}_\d{8}\.xlsx$/i.test(t));
+        if (!name) return null;
+        const button = $$('button', tr).find((b) =>
+          /^download$/i.test(squash(b.innerText))
+        );
+        return { name, button };
+      })
+      .filter(Boolean);
+  }
+
+  /** Is the report we asked for listed yet? The background calls this between
+   *  reloads, because the background owns navigation. */
+  async function findOrderReport(params) {
+    const wanted = String(params.expectedName || '').toLowerCase();
+    const rows = orderReportRows();
+    return {
+      ok: true,
+      found: rows.some((r) => r.name.toLowerCase() === wanted),
+      listed: rows.length
+    };
+  }
+
+  /** Click Download for that exact report, and let the background's download
+   *  watcher catch the file. */
+  async function downloadOrderReport(params) {
+    const wanted = String(params.expectedName || '').toLowerCase();
+    const row = orderReportRows().find((r) => r.name.toLowerCase() === wanted);
+    if (!row) throw new AppError(ORDER_ERR.NO_REPORT_ROW);
+    if (!row.button) throw new AppError(ORDER_ERR.NO_DOWNLOAD_BUTTON);
+
+    report(`Downloading ${row.name}…`);
+    // Same mechanism collectBIReport uses: tell the background the real name
+    // so a CDN redirect carrying none is not left as "download (2).xlsx".
+    expectName(row.name);
+    fullClick(row.button);
+    await wait(4000);
+    return { ok: true, filename: row.name, via: 'browser' };
+  }
+
+  /* ================================================================== *
    * Export drivers
    * ================================================================== */
 
@@ -1524,6 +1785,25 @@
               ? await runAdsExport(def, params)
               : await runBiExport(def, params);
           return { ok: true, filename: result.filename, via: result.via };
+        } finally {
+          stopHeartbeat();
+        }
+      }
+
+      // Orders: queued on one page, collected from another, so the background
+      // drives these four steps with a navigation in between.
+      case 'prepareOrderExport':
+      case 'triggerOrderExport':
+      case 'findOrderReport':
+      case 'downloadOrderReport': {
+        cancelled = false;
+        startHeartbeat();
+        try {
+          const params = msg.params || {};
+          if (msg.type === 'prepareOrderExport') return await prepareOrderExport(params);
+          if (msg.type === 'triggerOrderExport') return await triggerOrderExport(params);
+          if (msg.type === 'findOrderReport') return await findOrderReport(params);
+          return await downloadOrderReport(params);
         } finally {
           stopHeartbeat();
         }

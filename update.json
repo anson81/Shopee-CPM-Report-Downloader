@@ -1,8 +1,7 @@
 {
-    "version":  "1.10.2",
+    "version":  "1.11.0",
     "notes":  [
-                  "By Week now takes the week immediately before whatever Past 7 Days covers. Pick 9 Aug and Past 7 Days is 3-9 Aug, so By Week is 27 Jul - 2 Aug. It used to count a fixed two weeks back from the day you picked, which returned 20-26 Jul and skipped the week in between.",
-                  "A normal run with no date picked is unchanged."
+                  "Three more reports: Product Performance Past 30 Days, plus two 30-day Orders exports collected from My Reports"
               ],
     "files":  [
                   "background/background.js",

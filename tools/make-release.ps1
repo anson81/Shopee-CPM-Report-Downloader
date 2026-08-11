@@ -41,7 +41,10 @@ if (-not $check.content_scripts -or $check.content_scripts.Count -lt 2) {
 Write-Host "manifest.json: $old -> $Version"
 
 # --- collect the files that make up the extension ---------------------------
-$skip = @('tools', '.git', '.github', 'node_modules')
+# docs and tools live in the repo but are not part of the installed extension —
+# the updater fetches every file listed here, so shipping them would make each
+# update download design notes for no reason.
+$skip = @('tools', 'docs', '.git', '.github', 'node_modules')
 $files = Get-ChildItem -Path $root -Recurse -File |
     Where-Object {
         $rel = $_.FullName.Substring($root.Length + 1).Replace('\', '/')

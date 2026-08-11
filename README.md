@@ -1,7 +1,7 @@
 # 📥 Shopee Report Downloader
 
-A Chrome extension that downloads all **7 daily reports** from Shopee Seller
-Centre Malaysia with one click, instead of clicking through the site seven
+A Chrome extension that downloads all **10 daily reports** from Shopee Seller
+Centre Malaysia with one click, instead of clicking through the site ten
 times.
 
 Files keep Shopee's own names and are sorted into dated folders:
@@ -13,6 +13,8 @@ Downloads/
       05082026-Wednesday-0823/      ← one folder per run
         parentskudetail.20260804_20260804.xlsx
         Shopee-Ads-Overall-Data-30_07_2026-05_08_2026.csv
+        Order.all.20260706_20260804.xlsx
+        Order.all.20260606_20260705.xlsx
         ...
 ```
 
@@ -51,8 +53,8 @@ The orange icon appears in your toolbar. Pin it if you like.
 
 | Mode | What it does | Time |
 |------|--------------|------|
-| 🐌 **Slow n Steady** | One tab at a time. The safe option. | ~12 min |
-| 🏎 **Fast n Furious** | Opens all 7 pages together, then collects them. | ~4 min |
+| 🐌 **Slow n Steady** | One tab at a time. The safe option. | ~14 min |
+| 🏎 **Fast n Furious** | Opens the pages together, then collects them. | ~6 min |
 
 4. **Leave the window open and don't touch it** while it runs
 5. When it finishes, click **Open folder** to see your files
@@ -60,7 +62,13 @@ The orange icon appears in your toolbar. Pin it if you like.
 Both modes produce identical files. Use Slow n Steady if Fast n Furious ever
 gives you trouble.
 
-You can also click a single number (1–7) to download just that one report.
+You can also click a single number (1–10) to download just that one report.
+
+**The two Orders reports work differently.** Shopee does not hand those over on
+the spot — it builds them in the background and publishes them to My Reports a
+few minutes later. So the run asks for them first, fetches everything else while
+Shopee works, and collects them at the end. If the last minute of a run looks
+like nothing is happening, that is what it is doing.
 
 ### Choosing an earlier day
 
@@ -70,7 +78,7 @@ extension fetches that whole day instead.
 
 The whole run is then filed under that day's folder, not today's.
 
-### The 7 reports
+### The 10 reports
 
 | # | Report | Covers |
 |---|--------|--------|
@@ -81,8 +89,15 @@ The whole run is then filed under that day's folder, not today's.
 | 5 | By Week | last week |
 | 6 | Ads Overall | Shopee's own range |
 | 7 | Ads GMV MAX | Shopee's own range |
+| 8 | Past 30 Days | the last 30 days |
+| 9 | Orders (last 30 days) | the 30 days ending yesterday |
+| 10 | Orders (previous 30 days) | the 30 days before that |
 
 Each row in the popup shows the exact date it will fetch.
+
+Reports 9 and 10 are two back-to-back blocks: no day appears in both, and
+together they cover 60 days — which is exactly as far back as Shopee allows a
+single order export to reach.
 
 ---
 
