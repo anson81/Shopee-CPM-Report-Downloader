@@ -389,7 +389,16 @@ function computeParams(ex, realtimeDate) {
 
   // Real Time on a pinned run is fetched through the calendar rather than
   // Shopee's live "Real-Time" period, which only ever means right now.
-  if (ex.key === 'realtime' && pinned) pickDay(base);
+  //
+  // Except when the pinned day is yesterday. Shopee's By Day calendar greys out
+  // today AND yesterday — the newest day it will hand over is two days back.
+  // Read off the live picker on 11 Aug 2026: 11th and 10th disabled, 9th
+  // selectable. That is why Shopee ships a separate "Yesterday" button at all,
+  // and pressing it gets the same day the calendar refuses to give.
+  if (ex.key === 'realtime' && pinned) {
+    if (ymd(pinned) === ymd(addDays(now, -1))) params.presetLabel = 'Yesterday';
+    else pickDay(base);
+  }
 
   // Normally this clicks Shopee's own "Yesterday" button, which always means
   // the real yesterday. A pinned run has to walk the calendar instead.

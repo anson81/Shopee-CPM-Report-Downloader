@@ -1,10 +1,8 @@
 {
-    "version":  "1.10.0",
+    "version":  "1.10.1",
     "notes":  [
-                  "Picking a date now moves the whole run, not just Real Time. Pick 7 Aug and Yesterday means 6 Aug, By Day means 5 Aug, and By Week shifts with it. Before this, only Real Time moved and every other row still counted back from today.",
-                  "Past 7 Days becomes the whole week around the day before the one you picked. Shopee\u0027s calendar cannot select a rolling seven days for a past date, so a week is the closest it can do. Each row shows its real dates in the popup.",
-                  "Ads Overall and Ads GMV MAX never move. Shopee chooses their date range itself.",
-                  "The \u0027same day as #1\u0027 warning no longer appears when you pick yesterday. With everything shifted, two rows can no longer land on the same day."
+                  "Picking yesterday now works. Shopee\u0027s By Day calendar greys out today and yesterday — the newest day it will give you is two days back — so Real Time now presses Shopee\u0027s own Yesterday button instead of hunting the calendar for a day it refuses to offer. This is what failed on the 9 Aug run with \u0027could not select the target date\u0027.",
+                  "Any day two or more back still comes from the calendar, exactly as before."
               ],
     "files":  [
                   "background/background.js",

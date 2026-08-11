@@ -1415,6 +1415,10 @@
       await selectSpecificWeek(params);
     } else if (params.useCalendarDate) {
       await selectSpecificDate(params);
+    } else if (params.presetLabel) {
+      // A day the calendar refuses to offer, but one of Shopee's own buttons
+      // does — currently only "Yesterday". See computeParams().
+      await selectPeriodBI(params.presetLabel);
     } else if (exportDef.key === 'realtime') {
       const active = await waitFor(() => queryText(/Real[-\s]?Time/i)[0], {
         timeout: 5000
