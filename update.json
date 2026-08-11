@@ -1,7 +1,7 @@
 {
-    "version":  "1.11.0",
+    "version":  "1.11.1",
     "notes":  [
-                  "Three more reports: Product Performance Past 30 Days, plus two 30-day Orders exports collected from My Reports"
+                  "Fixes the Orders exports: the modal, the date picker and the Download button are all found correctly now"
               ],
     "files":  [
                   "background/background.js",

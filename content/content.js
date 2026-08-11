@@ -1389,15 +1389,34 @@
       "Found the orders report but not its Download button. Shopee's UI may have changed."
   };
 
-  /** The modal, found by its heading rather than a class that may change. */
+  /**
+   * The modal, found by its heading rather than a class that may change.
+   *
+   * Deliberately NOT $$vis. Measured on the live page 2026-08-11 with the
+   * modal plainly open on screen:
+   *   .eds-modal        height 0   — a positioning shell, nothing more
+   *   .eds-modal__box   opacity 0  — its enter-animation class was still on
+   *   .eds-modal__content          — laid out, opaque, holds the title
+   * isVisible rejects the first two, so looking for them found no modal at all
+   * and v1.11.0 failed every Orders export with "the window did not open".
+   * Animations are also throttled in background tabs, which is exactly where
+   * Fast n Furious runs, so opacity is not something to depend on here.
+   */
   function orderModal() {
-    const nodes = $$vis('.eds-modal, .eds-modal__box, [role="dialog"]');
-    return nodes.find((n) => /Export All Orders/i.test(n.innerText || '')) || null;
+    const nodes = $$('.eds-modal__content, .eds-modal__box, [role="dialog"]');
+    return (
+      nodes.find(
+        (n) =>
+          /Export All Orders/i.test(n.innerText || '') &&
+          n.getBoundingClientRect().width > 0
+      ) || null
+    );
   }
 
-  /** The Date Range box. Displays text; it is not an input. */
+  /** The Date Range box. Displays text; it is not an input. Scoped to the
+   *  modal so the order list's own filters can never be picked up instead. */
   function orderRangeBox() {
-    return $$vis('.eds-date-picker__input')[0] || null;
+    return $$vis('.eds-date-picker__input', orderModal() || document)[0] || null;
   }
 
   function orderRangeValue() {
@@ -1419,30 +1438,54 @@
     return $$vis('.eds-date-picker-panel__date');
   }
 
+  /** An arrow Shopee has greyed out. Clicking it does nothing at all, so a
+   *  loop that keeps pressing it just spins until it gives up. */
+  const ARROW_DISABLED = /(^|\s)dis(\s|$)/;
+
   /**
-   * Walk one calendar panel to the month we want.
+   * Find the panel showing a month, moving the calendar if it is not on show.
    *
-   * Re-reads the header after every press rather than counting a fixed number
-   * of clicks, so a panel that starts somewhere unexpected still lands right.
+   * The two panels hold INDEPENDENT months — after picking 12 June they read
+   * June and August, not June and July — and each arrow is greyed out whenever
+   * it would carry its panel across the other. So there is no one panel that
+   * can always be walked: this tries the left, then the right, and re-checks
+   * both after every press. Assuming the right panel could walk backwards is
+   * what left v1.11.0 unable to select the previous 30-day block at all.
    */
-  async function goToMonth(panelIndex, target) {
+  async function panelForMonth(target) {
     const want = target.getFullYear() * 12 + target.getMonth();
+    const showing = () =>
+      orderPanels().find((p) => {
+        const at = panelMonth(p);
+        return at && at.year * 12 + at.month === want;
+      }) || null;
+
     for (let attempt = 0; attempt < 30; attempt++) {
       checkCancel();
-      const panel = orderPanels()[panelIndex];
-      if (!panel) throw new AppError(ORDER_ERR.NO_CALENDAR);
-      const at = panelMonth(panel);
-      if (!at) throw new AppError(ORDER_ERR.NO_CALENDAR);
-      const have = at.year * 12 + at.month;
-      if (have === want) return panel;
+      const hit = showing();
+      if (hit) return hit;
 
-      const arrow = panel.querySelector(
-        have > want ? '.eds-picker-header__prev' : '.eds-picker-header__next'
-      );
-      if (!arrow) throw new AppError(ORDER_ERR.NO_CALENDAR);
-      fullClick(arrow);
+      const panels = orderPanels();
+      if (!panels.length) throw new AppError(ORDER_ERR.NO_CALENDAR);
+
+      let moved = false;
+      for (const panel of [panels[0], panels[panels.length - 1]]) {
+        const at = panelMonth(panel);
+        if (!at) continue;
+        const have = at.year * 12 + at.month;
+        if (have === want) return panel;
+        const arrow = panel.querySelector(
+          have > want ? '.eds-picker-header__prev' : '.eds-picker-header__next'
+        );
+        if (!arrow || ARROW_DISABLED.test(arrow.className)) continue;
+        fullClick(arrow);
+        moved = true;
+        break;
+      }
+      if (!moved) break;
       await wait(300);
     }
+
     const name = `${MONTH_NAMES[target.getMonth()]} ${target.getFullYear()}`;
     throw new AppError(
       `Could not reach ${name} in the Orders calendar. Export it manually and re-run.`
@@ -1480,23 +1523,24 @@
     report('Opening the date range…');
     const box = await waitFor(() => orderRangeBox(), { timeout: 10000 });
     if (!box) throw new AppError(ORDER_ERR.NO_CALENDAR);
-    fullClick(box);
-    await wait(800);
+
+    // The box itself ignores clicks — the focusable .eds-selector inside it is
+    // what opens the picker. Clicking the wrapper leaves the popper at
+    // display:none and every later step then finds no calendar.
+    const opener = box.querySelector('.eds-selector') || box;
+    for (let attempt = 0; attempt < 3 && !orderPanels().length; attempt++) {
+      fullClick(opener);
+      await wait(900);
+    }
     if (!orderPanels().length) throw new AppError(ORDER_ERR.NO_CALENDAR);
 
     report(`Picking ${params.orderRangeText}…`);
-    const startPanel = await goToMonth(0, from);
+    const startPanel = await panelForMonth(from);
     await clickDayCell(startPanel, from.getDate());
 
-    // Choosing a start can shift both panels, so locate the end month fresh.
-    const panels = orderPanels();
-    const endWant = to.getFullYear() * 12 + to.getMonth();
-    let endIndex = panels.findIndex((p) => {
-      const at = panelMonth(p);
-      return at && at.year * 12 + at.month === endWant;
-    });
-    if (endIndex < 0) endIndex = panels.length - 1;
-    const endPanel = await goToMonth(endIndex, to);
+    // Choosing a start moves the panels, so the end month is looked up fresh
+    // rather than assumed to be sitting in the panel beside it.
+    const endPanel = await panelForMonth(to);
     await clickDayCell(endPanel, to.getDate());
     await wait(600);
 
@@ -1579,15 +1623,43 @@
    * <button> with no href — the file arrives through JS, which the MAIN-world
    * interceptor already watches for.
    */
+  const ORDER_NAME_RE = /^Order\.[\w.]+\.\d{8}_\d{8}\.xlsx$/i;
+  const isDownloadButton = (b) => /^download$/i.test(squash(b.innerText));
+
   function orderReportRows() {
-    return $$('tr')
-      .map((tr) => {
-        const cells = [...tr.children].map((td) => squash(td.innerText));
-        const name = cells.find((t) => /^Order\.[\w.]+\.\d{8}_\d{8}\.xlsx$/i.test(t));
+    // The table is split in two: the data columns in one <table>, and the
+    // pinned Action column in another. A row holding a report name contains no
+    // Download button at all, so the two have to be paired by position — which
+    // is safe, because a pinned column exists precisely to stay in step.
+    const bodies = $$('table.eds-table__body');
+    let nameRows = [];
+    let actionRows = [];
+    for (const table of bodies) {
+      const rows = $$('tr', table);
+      if (!rows.length) continue;
+      if (
+        !nameRows.length &&
+        rows.some((r) => /Order\.[\w.]+\.\d{8}_\d{8}\.xlsx/i.test(r.innerText || ''))
+      ) {
+        nameRows = rows;
+      }
+      if (!actionRows.length && rows.some((r) => $$('button', r).some(isDownloadButton))) {
+        actionRows = rows;
+      }
+    }
+
+    return nameRows
+      .map((tr, i) => {
+        const name = [...tr.children]
+          .map((td) => squash(td.innerText))
+          .find((t) => ORDER_NAME_RE.test(t));
         if (!name) return null;
-        const button = $$('button', tr).find((b) =>
-          /^download$/i.test(squash(b.innerText))
-        );
+        // Fall back to the row itself, in case Shopee ever un-pins the column.
+        const actionRow = actionRows[i] || tr;
+        const button =
+          $$('button', actionRow).find(isDownloadButton) ||
+          $$('button', tr).find(isDownloadButton) ||
+          null;
         return { name, button };
       })
       .filter(Boolean);
