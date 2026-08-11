@@ -280,6 +280,24 @@ function mondayOf(d) {
  * The day (or range) each export covers.
  * `realtimeDate` pins export #1 to a chosen day instead of today.
  */
+/**
+ * What Past 7 Days covers.
+ *
+ * Normally the rolling week ending yesterday, straight from Shopee's own
+ * button. On a pinned run it becomes the Mon–Sun week containing the day
+ * before the pinned day — Shopee's calendar offers a single day or a whole
+ * week, never a rolling seven days for a past date.
+ *
+ * Shared so exportDates() and computeParams() cannot drift apart: one says
+ * what the popup shows, the other drives the page, and a disagreement between
+ * them is a file labelled with dates it does not contain.
+ */
+function past7Span(now, base, pinned) {
+  if (!pinned) return { from: addDays(now, -7), to: addDays(now, -1) };
+  const monday = mondayOf(addDays(base, -1));
+  return { from: monday, to: addDays(monday, 6) };
+}
+
 function exportDates(now, realtimeDate) {
   const pinned = parseYmd(realtimeDate);
   // A pinned date stands in for "today" for the WHOLE run, not just Real Time.
@@ -288,21 +306,22 @@ function exportDates(now, realtimeDate) {
   // Real Time moved, so a pinned run mixed one chosen day with four counted
   // from the real today, and pinning yesterday collided with the Yesterday row.
   const base = pinned || now;
-  const weekStart = addDays(mondayOf(base), -14);
+  const p7 = past7Span(now, base, pinned);
+  // By Week takes the week immediately BEFORE whatever Past 7 Days covers.
+  //
+  // Counting a fixed two weeks back from "today" only worked while Past 7 Days
+  // was a rolling window ending yesterday. On a pinned run it becomes a whole
+  // week, and two-back then skips the week in between: pin 9 Aug and Past 7
+  // Days takes 3–9 Aug while By Week jumped to 20–26 Jul, losing 27 Jul – 2 Aug
+  // altogether. Anchoring to Past 7 Days keeps the two rows adjacent — no gap,
+  // and no near-duplicate either, which is what the two-week step was avoiding.
+  const weekStart = addDays(mondayOf(p7.from), -7);
 
   return {
     1: { from: base, to: base, pinned: !!pinned },
     2: { from: addDays(base, -1), to: addDays(base, -1) },
     3: { from: addDays(base, -2), to: addDays(base, -2) },
-    // Past 7 Days is a rolling window, and Shopee's calendar cannot select one
-    // for a past date — it offers a single day or a whole Mon–Sun week. So a
-    // pinned run takes the week containing the day before the pinned day. That
-    // is a different span from the seven rolling days this row normally means,
-    // which is why the popup shows each row's actual dates rather than trusting
-    // its name.
-    4: pinned
-      ? { from: mondayOf(addDays(base, -1)), to: addDays(mondayOf(addDays(base, -1)), 6) }
-      : { from: addDays(now, -7), to: addDays(now, -1) },
+    4: p7,
     5: { from: weekStart, to: addDays(weekStart, 6) },
     // Shopee picks the Ads range itself — do not claim a date we do not set.
     6: null,
@@ -409,9 +428,11 @@ function computeParams(ex, realtimeDate) {
 
   // Same as Yesterday: Shopee's "Past 7 Days" button is anchored to the real
   // today, so a pinned run takes the week containing the day before instead.
-  if (ex.key === 'past7d' && pinned) pickWeek(mondayOf(addDays(base, -1)));
+  const p7 = past7Span(now, base, pinned);
+  if (ex.key === 'past7d' && pinned) pickWeek(p7.from);
 
-  if (ex.key === 'byweek_last') pickWeek(addDays(mondayOf(base), -14));
+  // The week immediately before Past 7 Days. See exportDates().
+  if (ex.key === 'byweek_last') pickWeek(addDays(mondayOf(p7.from), -7));
 
   return params;
 }

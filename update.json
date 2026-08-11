@@ -1,8 +1,8 @@
 {
-    "version":  "1.10.1",
+    "version":  "1.10.2",
     "notes":  [
-                  "Picking yesterday now works. Shopee\u0027s By Day calendar greys out today and yesterday — the newest day it will give you is two days back — so Real Time now presses Shopee\u0027s own Yesterday button instead of hunting the calendar for a day it refuses to offer. This is what failed on the 9 Aug run with \u0027could not select the target date\u0027.",
-                  "Any day two or more back still comes from the calendar, exactly as before."
+                  "By Week now takes the week immediately before whatever Past 7 Days covers. Pick 9 Aug and Past 7 Days is 3-9 Aug, so By Week is 27 Jul - 2 Aug. It used to count a fixed two weeks back from the day you picked, which returned 20-26 Jul and skipped the week in between.",
+                  "A normal run with no date picked is unchanged."
               ],
     "files":  [
                   "background/background.js",
