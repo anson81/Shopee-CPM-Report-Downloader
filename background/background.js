@@ -1210,7 +1210,17 @@ async function runExports(ids, mode) {
 
   // Write the trace while the run folder is still the target — saveFile()
   // depends on state.running and state.folder, which are cleared just below.
-  if (state.orderLog.length) {
+  //
+  // Only when something went wrong. A clean run should leave the folder
+  // holding reports and nothing else; the trace exists to explain a failure,
+  // not to be filed alongside the data every morning.
+  const ordersFailed = EXPORTS.some(
+    (e) =>
+      e.kind === 'order' &&
+      state.results[e.id] &&
+      state.results[e.id].status === 'error'
+  );
+  if (state.orderLog.length && (ordersFailed || state.error)) {
     try {
       const text = state.orderLog.join('\r\n') + '\r\n';
       await saveFile(

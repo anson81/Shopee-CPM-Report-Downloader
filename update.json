@@ -1,7 +1,7 @@
 {
-    "version":  "1.13.0",
+    "version":  "1.13.1",
     "notes":  [
-                  "Orders reports are collected from Export History on the same page, using the same code as the other reports - no more jumping to My Reports"
+                  "orders-log.txt is only written when an Orders export fails, so a clean run leaves just the reports"
               ],
     "files":  [
                   "background/background.js",

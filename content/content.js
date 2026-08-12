@@ -1869,7 +1869,14 @@
           if (msg.type === 'prepareExport') return await prepareExport(def, params);
           if (msg.type === 'triggerExport') return await triggerExport(def, params);
           const result = await collectExport(def, params);
-          return { ok: true, filename: result.filename, via: result.via };
+          // `looks` is only set by the Orders collector, and only reaches the
+          // log — the last run reported "after ? look(s)" without it.
+          return {
+            ok: true,
+            filename: result.filename,
+            via: result.via,
+            looks: result.looks
+          };
         } finally {
           stopHeartbeat();
         }

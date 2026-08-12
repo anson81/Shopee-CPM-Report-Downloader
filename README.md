@@ -63,9 +63,10 @@ over on the spot — it builds them on its own servers and lists them under
 asked for first and collected afterwards, so that wait overlaps with the other
 eight. If the last stretch of a run looks idle, that is what it is doing.
 
-Each run folder also gets a small **`orders-log.txt`** recording what those two
-did, step by step. Ignore it, or delete it — it is there so a failure can be
-explained rather than guessed at.
+If one of them ever fails, the run folder will also hold a small
+**`orders-log.txt`** recording what it did step by step, so the problem can be
+explained rather than guessed at. A run where everything worked leaves no such
+file.
 
 ### Choosing an earlier day
 
