@@ -1660,7 +1660,11 @@
           $$('button', actionRow).find(isDownloadButton) ||
           $$('button', tr).find(isDownloadButton) ||
           null;
-        return { name, button };
+        // While Shopee is still building the file the row is already listed,
+        // but its Action cell reads something like "Processing" instead of
+        // offering a button. That text is the readiness signal.
+        const action = squash(actionRow === tr ? '' : actionRow.innerText);
+        return { name, button, action };
       })
       .filter(Boolean);
   }
@@ -1688,18 +1692,33 @@
       await wait(1500);
     }
 
-    const rows = await waitFor(
+    // Wait for the report to be READY, not merely listed.
+    //
+    // Shopee lists the row within a second or two of the Export click, long
+    // before the file exists — the Action cell reads "Processing" and carries
+    // no button until it is built. v1.11.2 treated the row appearing as the
+    // file being ready, clicked a button that was not there, and died two
+    // seconds into a ten-minute wait. The button IS the readiness signal, the
+    // same way the BI exports wait for their row to stop saying Processing.
+    await waitFor(
       () => {
-        const found = orderReportRows();
-        return found.length ? found : null;
+        const hit = orderReportRows().find((r) => r.name.toLowerCase() === wanted);
+        return hit && hit.button ? hit : null;
       },
-      { timeout: 15000 }
+      // Short: the table does not repaint itself, so readiness arrives with
+      // the background's next reload. This only covers the pinned Action
+      // column rendering a moment after the name column — which is what made
+      // an otherwise finished report report buttons=0.
+      { timeout: 8000 }
     );
 
-    const listed = rows || [];
+    const listed = orderReportRows();
+    const hit = listed.find((r) => r.name.toLowerCase() === wanted);
     return {
       ok: true,
-      found: listed.some((r) => r.name.toLowerCase() === wanted),
+      found: !!(hit && hit.button), // ready to click
+      listedRow: !!hit, // present, but Shopee may still be building it
+      action: hit ? hit.action : '',
       listed: listed.length,
       names: listed.slice(0, 6).map((r) => r.name),
       withButtons: listed.filter((r) => r.button).length

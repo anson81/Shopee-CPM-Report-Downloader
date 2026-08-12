@@ -934,20 +934,29 @@ async function collectOrderExport(ex) {
     logOrder(
       `#${ex.id} collect: look ${round} -> ` +
         (found && found.ok
-          ? `found=${found.found} listed=${found.listed} buttons=${found.withButtons} [${(found.names || []).join(', ')}]`
+          ? `ready=${found.found} rowListed=${found.listedRow} action="${found.action || ''}" ` +
+            `listed=${found.listed} buttons=${found.withButtons}`
           : `no usable answer (${JSON.stringify(found)})`)
     );
     if (found && found.ok) saw = found;
     if (found && found.ok && found.found) break;
+
+    // Listed but not ready is the normal case for the first minute or two:
+    // Shopee publishes the row immediately and builds the file afterwards.
+    if (found && found.ok && found.listedRow) {
+      setResult(ex.id, { detail: 'Shopee is still building the file…' });
+    }
 
     if (Date.now() > deadline) {
       // Say what was on the page. A bare timeout gave no way to tell "Shopee
       // is still building it" apart from "we are reading the page wrong",
       // which are very different problems with the same symptom.
       const detail = saw
-        ? `My Reports listed ${saw.listed} report(s)` +
-          (saw.names && saw.names.length ? `: ${saw.names.join(', ')}` : '') +
-          '.'
+        ? saw.listedRow
+          ? 'It is listed in My Reports but Shopee never finished building it.'
+          : `My Reports listed ${saw.listed} other report(s)` +
+            (saw.names && saw.names.length ? `: ${saw.names.join(', ')}` : '') +
+            '.'
         : 'My Reports could not be read at all.';
       throw new AppError(
         `Waited 10 minutes for ${params.expectedName} and it never appeared. ` +

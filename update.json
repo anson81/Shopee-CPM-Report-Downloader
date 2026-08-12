@@ -1,7 +1,7 @@
 {
-    "version":  "1.11.3",
+    "version":  "1.11.4",
     "notes":  [
-                  "Writes orders-log.txt into the run folder so the Orders failure can be diagnosed"
+                  "Waits for the Download button to appear instead of assuming a listed report is ready"
               ],
     "files":  [
                   "background/background.js",
