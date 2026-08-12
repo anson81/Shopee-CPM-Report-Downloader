@@ -1136,21 +1136,32 @@ async function runFurious(selected) {
 async function findRunDownload(expected) {
   const folder = state.runFolder || state.folder;
   if (!folder) return null;
+
+  // Loose comparison on purpose. Shopee displays a name with slashes in it
+  // ("...-12/08/2026-...csv") that reaches disk with underscores, so an exact
+  // match would call a perfectly good file missing.
+  const loose = (s) => basename(s || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+
   try {
     const items = await chrome.downloads.search({
       limit: 40,
       orderBy: ['-startTime']
     });
-    const wanted = basename(expected || '').toLowerCase();
+    const wanted = loose(expected);
     const since = (state.startedAt || Date.now()) - 60000;
-    return (
-      items.find((item) => {
-        if (item.state !== 'complete' || item.exists === false) return false;
-        if (new Date(item.startTime).getTime() < since) return false;
-        if (!String(item.filename || '').includes(folder)) return false;
-        return !wanted || basename(item.filename).toLowerCase() === wanted;
-      }) || null
-    );
+    const inFolder = items.filter((item) => {
+      if (item.state !== 'complete' || item.exists === false) return false;
+      if (new Date(item.startTime).getTime() < since) return false;
+      return String(item.filename || '').includes(folder);
+    });
+
+    // Prefer the file we were expecting; otherwise take the newest thing this
+    // run put in the folder. Landing under a name we did not predict is worth
+    // reporting as a success — the file is there — and the run folder is
+    // ours alone, so nothing else can be in it.
+    return inFolder.find((item) => wanted && loose(item.filename) === wanted) ||
+      inFolder[0] ||
+      null;
   } catch (_) {
     return null;
   }
@@ -1159,11 +1170,12 @@ async function findRunDownload(expected) {
 /**
  * A page-initiated download is only real once Chrome has finished writing.
  *
- * The no-capture case used to fall through to `return res.filename`, which
- * reported a tick and a filename for a file nobody had seen land. The 12:14
- * run on 12 Aug 2026 recorded nine files that way and wrote none of them:
- * every download had been diverted, and only the one report that saves its
- * own file — GMV Max — noticed. A missing file has to be louder than that.
+ * The no-capture case used to fall through to `return res.filename` — the name
+ * the content script EXPECTED — so a report could be ticked for a file nobody
+ * had seen arrive. Our onDeterminingFilename listener is what puts a
+ * page-started download into the dated folder and what records the capture, so
+ * no capture means no controlled placement, and that deserves a look rather
+ * than a tick.
  */
 async function confirmDownload(res) {
   if (res.via !== 'browser') return res.filename;

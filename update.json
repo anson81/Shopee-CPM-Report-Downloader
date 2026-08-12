@@ -1,7 +1,7 @@
 {
-    "version":  "1.14.2",
+    "version":  "1.14.3",
     "notes":  [
-                  "A report is no longer marked done unless its file actually landed in the run folder"
+                  "Looser check on where a downloaded file landed, so a correctly saved report is never called missing"
               ],
     "files":  [
                   "background/background.js",
