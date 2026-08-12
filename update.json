@@ -1,7 +1,7 @@
 {
-    "version":  "1.12.0",
+    "version":  "1.13.0",
     "notes":  [
-                  "One run mode, and the two Orders reports now run in their own tabs alongside the rest instead of before and after"
+                  "Orders reports are collected from Export History on the same page, using the same code as the other reports - no more jumping to My Reports"
               ],
     "files":  [
                   "background/background.js",

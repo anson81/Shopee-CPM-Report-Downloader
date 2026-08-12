@@ -13,8 +13,6 @@
 const BI_URL = 'https://seller.shopee.com.my/datacenter/product/overview';
 const ADS_URL = 'https://seller.shopee.com.my/portal/marketing/pas/index';
 const ORDER_URL = 'https://seller.shopee.com.my/portal/sale/order';
-const REPORTS_URL =
-  'https://seller.shopee.com.my/portal/settings/shop/reports/order';
 const LOGIN_URL = 'https://seller.shopee.com.my/datacenter/overview';
 const ROOT_FOLDER = 'Shopee daily report';
 
@@ -858,31 +856,6 @@ async function checkLogin() {
   if (!res || !res.ok || !res.loggedIn) throw new AppError(ERR.NOT_LOGGED_IN);
 }
 
-/* -------------------------------------------------------------------- *
- * Orders: queued now, collected later
- *
- * The other eight reports download while you watch. An order export does not:
- * clicking Export queues a job on Shopee's side and the file appears in My
- * Reports some minutes later, under a name that encodes the date range.
- *
- * So a run queues both blocks up front, does everything else while Shopee
- * builds them, and comes back at the end. The waiting costs almost nothing
- * because it overlaps with the other downloads.
- * -------------------------------------------------------------------- */
-const ORDER_POLL_MS = 15000;
-const ORDER_TIMEOUT_MS = 600000; // 10 min — the same patience GMV Max gets
-
-/**
- * When each order export was asked for, so collection can insist on a report
- * this run actually produced.
- *
- * Slack because Shopee stamps Request Time from its own clock: a minute of
- * skew must not disqualify the right row. It only has to be tight enough to
- * exclude an earlier RUN, and runs are minutes apart at the very least.
- */
-const orderRequestedAt = new Map();
-const ORDER_TIME_SLACK_MS = 120000;
-
 /** How many Orders exports this run is actually doing. */
 function selectedOrderCount() {
   return EXPORTS.filter(
@@ -906,89 +879,6 @@ function describeError(e) {
   const message = e.message || String(e);
   const stack = e.stack ? ` | ${String(e.stack).split('\n').slice(0, 3).join(' <- ')}` : '';
   return `${e.name || 'Error'}: ${message}${stack}`;
-}
-
-async function collectOrderExport(ex, tabId) {
-  const params = computeParams(ex, state.realtimeDate);
-  const askedAt = orderRequestedAt.get(ex.id) || 0;
-  params.requestedAfter = askedAt ? askedAt - ORDER_TIME_SLACK_MS : 0;
-  const deadline = Date.now() + ORDER_TIMEOUT_MS;
-
-  state.watch = { armed: false, capturedId: null, capturedName: '' };
-  state.expectedName = params.expectedName;
-  persistRun();
-
-  let saw = null; // what the last look at My Reports actually turned up
-  let round = 0;
-  logOrder(`#${ex.id} collect: looking for ${params.expectedName}`);
-  for (;;) {
-    if (state.cancel) throw new AppError(ERR.CANCELLED);
-    setResult(ex.id, { detail: `Waiting for ${params.expectedName}…` });
-    round++;
-
-    await navigate(tabId, REPORTS_URL);
-    await waitForContentScript(tabId);
-    const found = await sendToContent(tabId, { type: 'findOrderReport', params });
-    logOrder(
-      `#${ex.id} collect: look ${round} -> ` +
-        (found && found.ok
-          ? `ready=${found.found} rowListed=${found.listedRow} ` +
-            `staleOnly=${found.staleOnly} action="${found.action || ''}" ` +
-            `listed=${found.listed} buttons=${found.withButtons}`
-          : `no usable answer (${JSON.stringify(found)})`)
-    );
-    if (found && found.ok) saw = found;
-    if (found && found.ok && found.found) break;
-
-    // Listed but not ready is the normal case for the first minute or two:
-    // Shopee publishes the row immediately and builds the file afterwards.
-    if (found && found.ok && found.listedRow) {
-      setResult(ex.id, { detail: 'Shopee is still building the file…' });
-    } else if (found && found.ok && found.staleOnly) {
-      // Only an older file of this name is on the page. Waiting is right:
-      // downloading it would hand back a previous run's numbers.
-      setResult(ex.id, { detail: 'Waiting for this run’s file, not an older one…' });
-    }
-
-    if (Date.now() > deadline) {
-      // Say what was on the page. A bare timeout gave no way to tell "Shopee
-      // is still building it" apart from "we are reading the page wrong",
-      // which are very different problems with the same symptom.
-      const detail = saw
-        ? saw.listedRow
-          ? 'It is listed in My Reports but Shopee never finished building it.'
-          : saw.staleOnly
-            ? 'Only an older file of the same name is in My Reports, so Shopee ' +
-              'never accepted this request — most likely it was rate-limited. ' +
-              'Nothing was downloaded, rather than give you last time’s numbers.'
-            : `My Reports listed ${saw.listed} other report(s)` +
-              (saw.names && saw.names.length ? `: ${saw.names.join(', ')}` : '') +
-              '.'
-        : 'My Reports could not be read at all.';
-      throw new AppError(
-        `Waited 10 minutes for ${params.expectedName} and it never appeared. ` +
-          `${detail} Download it by hand from My Reports, or re-run this export on its own.`
-      );
-    }
-    await sleep(ORDER_POLL_MS);
-  }
-
-  setResult(ex.id, { detail: 'Downloading…' });
-  logOrder(`#${ex.id} collect: clicking Download`);
-  const res = await sendToContent(tabId, { type: 'downloadOrderReport', params });
-  if (!res) throw new AppError(ERR.TAB_GONE);
-  if (res.cancelled) throw new AppError(ERR.CANCELLED);
-  if (!res.ok) {
-    throw new AppError(res.error || 'Could not download the orders report.');
-  }
-
-  logOrder(
-    `#${ex.id} collect: clicked, watcher captured id=${state.watch.capturedId} ` +
-      `name=${state.watch.capturedName || '(none)'}`
-  );
-  const name = await confirmDownload(res);
-  logOrder(`#${ex.id} collect: saved as ${name}`);
-  setResult(ex.id, { status: 'done', filename: name, detail: name });
 }
 
 /**
@@ -1093,9 +983,6 @@ async function runPhase(slots, phase, label) {
       params.initialWaitMs = 2000; // preloadTabs already did the long settle
 
       if (phase === 'triggerExport' && slot.ex.kind === 'order') {
-        // Stamped before the click, so any row Shopee creates for it is at or
-        // after this moment. See orderRequestedAt.
-        orderRequestedAt.set(slot.ex.id, Date.now());
         logOrder(
           `#${slot.ex.id} trigger: asking for ${params.orderRangeText} -> ${params.expectedName}`
         );
@@ -1114,7 +1001,10 @@ async function runPhase(slots, phase, label) {
         if (res.rateLimited) {
           logOrder(`#${slot.ex.id} trigger: RATE LIMITED ("${res.toast}")`);
         } else {
-          logOrder(`#${slot.ex.id} trigger: requested OK`);
+          logOrder(
+            `#${slot.ex.id} trigger: requested OK ` +
+              `(${res.listedBefore} report(s) listed beforehand)`
+          );
         }
         // Space the two Orders requests. Both hit the same page, and Shopee
         // turns down a repeat it thinks is too soon with a toast rather than
@@ -1160,16 +1050,6 @@ async function runFurious(selected) {
       await sleep(250);
       setResult(slot.ex.id, { detail: 'Downloading…' });
 
-      // Orders are collected from a different page than they were requested
-      // on, so this one drives its own tab there and waits for the file to be
-      // built. Same tab, same slot, same place in the run as everything else.
-      if (slot.ex.kind === 'order') {
-        await collectOrderExport(slot.ex, slot.tabId);
-        done++;
-        await closeTabs([slot.tabId]);
-        continue;
-      }
-
       const params = computeParams(slot.ex, state.realtimeDate);
       params.initialWaitMs = 2000;
 
@@ -1184,6 +1064,11 @@ async function runFurious(selected) {
 
       const name = await confirmDownload(res);
       assertNotStale(slot.ex, name);
+      if (slot.ex.kind === 'order') {
+        logOrder(
+          `#${slot.ex.id} collect: saved as ${name} after ${res.looks || '?'} look(s)`
+        );
+      }
       setResult(slot.ex.id, { status: 'done', filename: name, detail: name });
       done++;
       await closeTabs([slot.tabId]);

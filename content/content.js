@@ -1550,8 +1550,46 @@
     return { ok: true, prepared: true };
   }
 
+  /**
+   * The Orders page keeps its Latest Reports panel behind an "Export History"
+   * button instead of showing it inline. That is the ONLY thing that differs
+   * from the BI pages — once it is open, findReportsPanel/readReportRows/
+   * newRows read it exactly as they read theirs.
+   *
+   * Closed and reopened rather than just opened, because the panel fetches its
+   * contents when it opens; left open it would keep showing what was true
+   * before the export was requested.
+   */
+  function exportHistoryButton() {
+    return (
+      $$vis('button').find((b) => /^export history$/i.test(squash(b.innerText))) ||
+      null
+    );
+  }
+
+  async function refreshOrderTray() {
+    const history = exportHistoryButton();
+    if (!history) return false;
+    if (findReportsPanel()) {
+      fullClick(history); // close
+      await wait(600);
+    }
+    fullClick(history); // open, fetching fresh
+    await waitFor(() => findReportsPanel(), { timeout: 8000 });
+    return !!findReportsPanel();
+  }
+
   /** Phase 2 — queue the export. Deliberately does not wait for the file. */
-  async function triggerOrderExport(params) {
+  async function triggerOrderExport(exportDef, params) {
+    // Snapshot the panel first, exactly as the BI trigger does, so the row
+    // this export creates can be told from the identically named ones already
+    // sitting there. An Orders filename is built from its date range, so a
+    // re-run on the same day produces the same name — counting is the only
+    // thing that separates them.
+    await refreshOrderTray();
+    const before = readReportRows();
+    report(`Latest Reports holds ${before.length} report(s) before this export.`);
+
     report('Opening Export…');
     const button = await waitFor(
       () => {
@@ -1592,184 +1630,83 @@
     // Shopee turns down an export it considers too soon with a toast, not an
     // error — the same behaviour that used to leave the BI exports quietly
     // downloading the previous report. Saying so beats a silent no-op, and
-    // the Request Time check in findOrderReport catches it either way.
+    // the before/after row count catches it either way.
     const toast = cooldownToast();
     if (toast) {
       report(`Shopee is rate-limiting exports ("${toast}") — waiting 60s…`);
       await wait(60000);
-      return { ok: true, triggered: true, rateLimited: true, toast };
+      pending = { before, key: exportDef.key };
+      return {
+        ok: true,
+        triggered: true,
+        rateLimited: true,
+        toast,
+        listedBefore: before.length
+      };
     }
 
+    // Carried to collect, same as the BI trigger does.
+    pending = { before, key: params.key || 'order' };
     report('Export requested — Shopee is building it.');
-    return { ok: true, triggered: true };
+    return { ok: true, triggered: true, listedBefore: before.length };
   }
 
   /**
-   * Rows on /portal/settings/shop/reports/order.
+   * Phase 3 for orders — wait for the row this export created, then download.
    *
-   * Columns are Report Type, Request Time, Request Account, Report name,
-   * Action. The report name carries its own date range, and Download is a
-   * <button> with no href — the file arrives through JS, which the MAIN-world
-   * interceptor already watches for.
+   * The same shape as collectBIReport: wait for a row that was not in `before`,
+   * wait for its Download control, click it through triggerAndCapture. The one
+   * addition is reopening the tray between looks, because it does not repaint
+   * itself the way the BI panel does.
    */
-  const ORDER_NAME_RE = /^Order\.[\w.]+\.\d{8}_\d{8}\.xlsx$/i;
-  const isDownloadButton = (b) => /^download$/i.test(squash(b.innerText));
-  const REQUEST_TIME_RE = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/;
+  async function collectOrderReport(before, params) {
+    const wanted = normalizeShopeeName(String(params.expectedName || ''));
+    const deadline = Date.now() + 600000; // 10 min — Shopee builds these slowly
+    let looks = 0;
 
-  /**
-   * The Request Time cell, as a local timestamp.
-   *
-   * Built field by field rather than handed to Date.parse, which treats a
-   * bare "2026-08-12 10:15:08" inconsistently across engines. Shopee reports
-   * this in the shop's own timezone, the same one the browser is in.
-   */
-  function parseRequestTime(text) {
-    const m = REQUEST_TIME_RE.exec(text);
-    if (!m) return 0;
-    return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
-  }
-
-  function orderReportRows() {
-    // The table is split in two: the data columns in one <table>, and the
-    // pinned Action column in another. A row holding a report name contains no
-    // Download button at all, so the two have to be paired by position — which
-    // is safe, because a pinned column exists precisely to stay in step.
-    const bodies = $$('table.eds-table__body');
-    let nameRows = [];
-    let actionRows = [];
-    for (const table of bodies) {
-      const rows = $$('tr', table);
-      if (!rows.length) continue;
-      if (
-        !nameRows.length &&
-        rows.some((r) => /Order\.[\w.]+\.\d{8}_\d{8}\.xlsx/i.test(r.innerText || ''))
-      ) {
-        nameRows = rows;
-      }
-      if (!actionRows.length && rows.some((r) => $$('button', r).some(isDownloadButton))) {
-        actionRows = rows;
-      }
-    }
-
-    return nameRows
-      .map((tr, i) => {
-        const cells = [...tr.children].map((td) => squash(td.innerText));
-        const name = cells.find((t) => ORDER_NAME_RE.test(t));
-        if (!name) return null;
-        // An Orders filename is built from its date range, so the same run on
-        // the same day always produces the SAME name. Request Time is the only
-        // thing that tells this run's file from last night's.
-        const requestedAt = cells.reduce(
-          (best, t) => Math.max(best, parseRequestTime(t)),
-          0
+    for (;;) {
+      checkCancel();
+      looks++;
+      if (!(await refreshOrderTray())) {
+        throw new AppError(
+          "Could not open Export History on the Orders page. Shopee's UI may have changed."
         );
-        // Fall back to the row itself, in case Shopee ever un-pins the column.
-        const actionRow = actionRows[i] || tr;
-        const button =
-          $$('button', actionRow).find(isDownloadButton) ||
-          $$('button', tr).find(isDownloadButton) ||
-          null;
-        // While Shopee is still building the file the row is already listed,
-        // but its Action cell reads something like "Processing" instead of
-        // offering a button. That text is the readiness signal.
-        const action = squash(actionRow === tr ? '' : actionRow.innerText);
-        return { name, button, action, requestedAt };
-      })
-      .filter(Boolean);
-  }
+      }
 
-  /**
-   * Is the report we asked for listed yet?
-   *
-   * Called by the background between reloads, because the background owns
-   * navigation. It waits for the table itself: "complete" only means the
-   * document finished, and My Reports fills its rows from a later request —
-   * answering the instant the page loads is answering before there is
-   * anything to see.
-   *
-   * Reports back what it DID see either way. A silent false gives the popup
-   * nothing to show but "waiting", for ten minutes, which is what made the
-   * first collect failure so hard to place.
-   */
-  async function findOrderReport(params) {
-    const wanted = String(params.expectedName || '').toLowerCase();
+      const rows = readReportRows();
+      const fresh = newRows(before, rows).filter(
+        (r) => !wanted || normalizeShopeeName(r.name) === wanted
+      );
+      const ready = fresh.find((r) => r.button);
 
-    // Make sure we are on the Order Export tab before reading anything.
-    const chip = $$vis('.eds-chip').find((c) => /^Order Export$/i.test(squash(c.innerText)));
-    if (chip && !/eds-chip--active/.test(chip.className)) {
-      fullClick(chip);
-      await wait(1500);
+      if (ready) {
+        report(`Downloading ${ready.name}…`);
+        expectName(normalizeShopeeName(ready.name));
+        const result = await triggerAndCapture(async () => fullClick(ready.button), {
+          settleMs: 5000,
+          preferredName: normalizeShopeeName(ready.name),
+          fallbackBase:
+            normalizeShopeeName(ready.name).replace(/\.[^.]+$/, '') ||
+            params.fallbackBase
+        });
+        return { ...result, looks, listedBefore: before.length };
+      }
+
+      if (fresh.length) {
+        report(`Shopee is still building ${fresh[0].name}…`);
+      } else {
+        report(`Waiting for ${params.expectedName} (look ${looks})…`);
+      }
+
+      if (Date.now() > deadline) {
+        throw new AppError(
+          `Waited 10 minutes and ${params.expectedName} never appeared as a new ` +
+            'report. Shopee may have turned the request down — nothing was ' +
+            'downloaded, rather than hand back an older file of the same name.'
+        );
+      }
+      await wait(10000);
     }
-
-    // Wait for the report to be READY, not merely listed.
-    //
-    // Shopee lists the row within a second or two of the Export click, long
-    // before the file exists — the Action cell reads "Processing" and carries
-    // no button until it is built. v1.11.2 treated the row appearing as the
-    // file being ready, clicked a button that was not there, and died two
-    // seconds into a ten-minute wait. The button IS the readiness signal, the
-    // same way the BI exports wait for their row to stop saying Processing.
-    // Only a row this run actually created will do.
-    //
-    // Reports 1-7 get this for free: they snapshot the panel before clicking
-    // Export and insist on a row that was not there before, because Shopee
-    // answers a rate-limited export with a toast rather than an error and
-    // would otherwise leave us downloading the previous report. Orders need
-    // the same guard and cannot use the same trick — the export is requested
-    // on one page and collected on another — so freshness is judged by the
-    // Request Time column instead.
-    const after = Number(params.requestedAfter || 0);
-    const isOurs = (r) =>
-      r.name.toLowerCase() === wanted && (!after || r.requestedAt >= after);
-
-    await waitFor(
-      () => {
-        const hit = orderReportRows().find((r) => isOurs(r) && r.button);
-        return hit || null;
-      },
-      // Short: the table does not repaint itself, so readiness arrives with
-      // the background's next reload. This only covers the pinned Action
-      // column rendering a moment after the name column — which is what made
-      // an otherwise finished report report buttons=0.
-      { timeout: 8000 }
-    );
-
-    const listed = orderReportRows();
-    const hit = listed.find(isOurs);
-    const sameNameAny = listed.find((r) => r.name.toLowerCase() === wanted);
-    return {
-      ok: true,
-      found: !!(hit && hit.button), // ours, and ready to click
-      listedRow: !!hit, // ours, but Shopee may still be building it
-      staleOnly: !hit && !!sameNameAny, // an older file of the same name exists
-      action: hit ? hit.action : '',
-      requestedAt: hit ? hit.requestedAt : sameNameAny ? sameNameAny.requestedAt : 0,
-      listed: listed.length,
-      names: listed.slice(0, 6).map((r) => r.name),
-      withButtons: listed.filter((r) => r.button).length
-    };
-  }
-
-  /** Click Download for that exact report, and let the background's download
-   *  watcher catch the file. */
-  async function downloadOrderReport(params) {
-    const wanted = String(params.expectedName || '').toLowerCase();
-    const after = Number(params.requestedAfter || 0);
-    // Same freshness test as findOrderReport. Matching on name alone here
-    // would hand back an identically named file from an earlier run.
-    const row = orderReportRows().find(
-      (r) => r.name.toLowerCase() === wanted && (!after || r.requestedAt >= after)
-    );
-    if (!row) throw new AppError(ORDER_ERR.NO_REPORT_ROW);
-    if (!row.button) throw new AppError(ORDER_ERR.NO_DOWNLOAD_BUTTON);
-
-    report(`Downloading ${row.name}…`);
-    // Same mechanism collectBIReport uses: tell the background the real name
-    // so a CDN redirect carrying none is not left as "download (2).xlsx".
-    expectName(row.name);
-    fullClick(row.button);
-    await wait(4000);
-    return { ok: true, filename: row.name, via: 'browser' };
   }
 
   /* ================================================================== *
@@ -1851,7 +1788,7 @@
 
   /** Phase 2 — ask Shopee to build the report. Deliberately does not wait. */
   async function triggerExport(exportDef, params) {
-    if (exportDef.kind === 'order') return triggerOrderExport(params);
+    if (exportDef.kind === 'order') return triggerOrderExport(exportDef, params);
 
     // Snapshot the panel first, so the row this click creates can be told
     // apart from reports that were already listed.
@@ -1891,6 +1828,9 @@
     const before = pending && pending.key === exportDef.key ? pending.before : [];
     pending = null;
 
+    if (exportDef.kind === 'order') {
+      return collectOrderReport(before, params);
+    }
     if (exportDef.key === 'gmv_max') {
       return downloadGmvMax(before, params.fallbackBase);
     }
@@ -1912,22 +1852,6 @@
         startHeartbeat();
         try {
           return { ok: true, ...(await checkLogin()) };
-        } finally {
-          stopHeartbeat();
-        }
-      }
-
-      // Orders are prepared and triggered through the ordinary phase messages
-      // above. Only collection needs its own pair, because the file is picked
-      // up from a different page and the background owns navigation.
-      case 'findOrderReport':
-      case 'downloadOrderReport': {
-        cancelled = false;
-        startHeartbeat();
-        try {
-          const params = msg.params || {};
-          if (msg.type === 'findOrderReport') return await findOrderReport(params);
-          return await downloadOrderReport(params);
         } finally {
           stopHeartbeat();
         }

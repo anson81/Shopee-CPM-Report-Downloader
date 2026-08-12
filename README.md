@@ -58,10 +58,10 @@ as they finish. You can also click a single number (1–10) to fetch just that
 one report.
 
 **The two Orders reports take longer to arrive.** Shopee does not hand those
-over on the spot — it builds them on its own servers and publishes them to My
-Reports a minute or two later. The run asks early and picks them up at the end,
-so the wait overlaps with everything else. If the last stretch of a run looks
-idle, that is what it is doing.
+over on the spot — it builds them on its own servers and lists them under
+**Export History** on the same page a minute or two later. Every report is
+asked for first and collected afterwards, so that wait overlaps with the other
+eight. If the last stretch of a run looks idle, that is what it is doing.
 
 Each run folder also gets a small **`orders-log.txt`** recording what those two
 did, step by step. Ignore it, or delete it — it is there so a failure can be
