@@ -1,7 +1,7 @@
 {
-    "version":  "1.11.4",
+    "version":  "1.11.5",
     "notes":  [
-                  "Waits for the Download button to appear instead of assuming a listed report is ready"
+                  "Orders exports now refuse an identically named file from an earlier run, matching the stale-report guard the other reports already had"
               ],
     "files":  [
                   "background/background.js",

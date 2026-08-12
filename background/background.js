@@ -872,6 +872,17 @@ async function checkLogin() {
 const ORDER_POLL_MS = 15000;
 const ORDER_TIMEOUT_MS = 600000; // 10 min — the same patience GMV Max gets
 
+/**
+ * When each order export was asked for, so collection can insist on a report
+ * this run actually produced.
+ *
+ * Slack because Shopee stamps Request Time from its own clock: a minute of
+ * skew must not disqualify the right row. It only has to be tight enough to
+ * exclude an earlier RUN, and runs are minutes apart at the very least.
+ */
+const orderRequestedAt = new Map();
+const ORDER_TIME_SLACK_MS = 120000;
+
 /** One line in orders-log.txt. */
 function logOrder(message) {
   const now = new Date();
@@ -900,6 +911,9 @@ async function queueOrderExport(ex) {
 
   setResult(ex.id, { detail: `Requesting ${params.orderRangeText}…` });
   logOrder(`#${ex.id} queue: asking for ${params.orderRangeText} -> ${params.expectedName}`);
+  // Stamped before the click, so any row Shopee creates for it is at or after
+  // this moment. See orderRequestedAt.
+  orderRequestedAt.set(ex.id, Date.now());
   const res = await sendToContent(tabId, { type: 'triggerOrderExport', params });
   if (!res) throw new AppError(ERR.TAB_GONE);
   if (res.cancelled) throw new AppError(ERR.CANCELLED);
@@ -907,12 +921,17 @@ async function queueOrderExport(ex) {
     throw new AppError(res.error || 'Could not request the orders export.');
   }
 
+  if (res.rateLimited) {
+    logOrder(`#${ex.id} queue: RATE LIMITED by Shopee ("${res.toast}")`);
+  }
   logOrder(`#${ex.id} queue: requested OK`);
   setResult(ex.id, { detail: 'Generating on Shopee…' });
 }
 
 async function collectOrderExport(ex) {
   const params = computeParams(ex, state.realtimeDate);
+  const askedAt = orderRequestedAt.get(ex.id) || 0;
+  params.requestedAfter = askedAt ? askedAt - ORDER_TIME_SLACK_MS : 0;
   const deadline = Date.now() + ORDER_TIMEOUT_MS;
 
   state.watch = { armed: false, capturedId: null, capturedName: '' };
@@ -934,7 +953,8 @@ async function collectOrderExport(ex) {
     logOrder(
       `#${ex.id} collect: look ${round} -> ` +
         (found && found.ok
-          ? `ready=${found.found} rowListed=${found.listedRow} action="${found.action || ''}" ` +
+          ? `ready=${found.found} rowListed=${found.listedRow} ` +
+            `staleOnly=${found.staleOnly} action="${found.action || ''}" ` +
             `listed=${found.listed} buttons=${found.withButtons}`
           : `no usable answer (${JSON.stringify(found)})`)
     );
@@ -945,6 +965,10 @@ async function collectOrderExport(ex) {
     // Shopee publishes the row immediately and builds the file afterwards.
     if (found && found.ok && found.listedRow) {
       setResult(ex.id, { detail: 'Shopee is still building the file…' });
+    } else if (found && found.ok && found.staleOnly) {
+      // Only an older file of this name is on the page. Waiting is right:
+      // downloading it would hand back a previous run's numbers.
+      setResult(ex.id, { detail: 'Waiting for this run’s file, not an older one…' });
     }
 
     if (Date.now() > deadline) {
@@ -954,9 +978,13 @@ async function collectOrderExport(ex) {
       const detail = saw
         ? saw.listedRow
           ? 'It is listed in My Reports but Shopee never finished building it.'
-          : `My Reports listed ${saw.listed} other report(s)` +
-            (saw.names && saw.names.length ? `: ${saw.names.join(', ')}` : '') +
-            '.'
+          : saw.staleOnly
+            ? 'Only an older file of the same name is in My Reports, so Shopee ' +
+              'never accepted this request — most likely it was rate-limited. ' +
+              'Nothing was downloaded, rather than give you last time’s numbers.'
+            : `My Reports listed ${saw.listed} other report(s)` +
+              (saw.names && saw.names.length ? `: ${saw.names.join(', ')}` : '') +
+              '.'
         : 'My Reports could not be read at all.';
       throw new AppError(
         `Waited 10 minutes for ${params.expectedName} and it never appeared. ` +
@@ -1324,7 +1352,10 @@ async function runExports(ids, mode) {
       try {
         await queueOrderExport(ex);
         queued.push(ex);
-        await sleep(5000);
+        // A gap between the two requests. 34s apart was observed working on
+        // 12 Aug, and 5s was never tested — the BI exports need 65s, so some
+        // margin is worth 15 seconds of a run that waits minutes anyway.
+        await sleep(20000);
       } catch (e) {
         const message = e && e.message ? e.message : String(e);
         logOrder(`#${ex.id} queue FAILED: ${describeError(e)}`);

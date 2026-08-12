@@ -1611,6 +1611,17 @@
     fullClick(submit);
     await wait(3000);
 
+    // Shopee turns down an export it considers too soon with a toast, not an
+    // error — the same behaviour that used to leave the BI exports quietly
+    // downloading the previous report. Saying so beats a silent no-op, and
+    // the Request Time check in findOrderReport catches it either way.
+    const toast = cooldownToast();
+    if (toast) {
+      report(`Shopee is rate-limiting exports ("${toast}") — waiting 60s…`);
+      await wait(60000);
+      return { ok: true, triggered: true, rateLimited: true, toast };
+    }
+
     report('Export requested — Shopee is building it.');
     return { ok: true, triggered: true };
   }
@@ -1625,6 +1636,20 @@
    */
   const ORDER_NAME_RE = /^Order\.[\w.]+\.\d{8}_\d{8}\.xlsx$/i;
   const isDownloadButton = (b) => /^download$/i.test(squash(b.innerText));
+  const REQUEST_TIME_RE = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/;
+
+  /**
+   * The Request Time cell, as a local timestamp.
+   *
+   * Built field by field rather than handed to Date.parse, which treats a
+   * bare "2026-08-12 10:15:08" inconsistently across engines. Shopee reports
+   * this in the shop's own timezone, the same one the browser is in.
+   */
+  function parseRequestTime(text) {
+    const m = REQUEST_TIME_RE.exec(text);
+    if (!m) return 0;
+    return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
+  }
 
   function orderReportRows() {
     // The table is split in two: the data columns in one <table>, and the
@@ -1650,10 +1675,16 @@
 
     return nameRows
       .map((tr, i) => {
-        const name = [...tr.children]
-          .map((td) => squash(td.innerText))
-          .find((t) => ORDER_NAME_RE.test(t));
+        const cells = [...tr.children].map((td) => squash(td.innerText));
+        const name = cells.find((t) => ORDER_NAME_RE.test(t));
         if (!name) return null;
+        // An Orders filename is built from its date range, so the same run on
+        // the same day always produces the SAME name. Request Time is the only
+        // thing that tells this run's file from last night's.
+        const requestedAt = cells.reduce(
+          (best, t) => Math.max(best, parseRequestTime(t)),
+          0
+        );
         // Fall back to the row itself, in case Shopee ever un-pins the column.
         const actionRow = actionRows[i] || tr;
         const button =
@@ -1664,7 +1695,7 @@
         // but its Action cell reads something like "Processing" instead of
         // offering a button. That text is the readiness signal.
         const action = squash(actionRow === tr ? '' : actionRow.innerText);
-        return { name, button, action };
+        return { name, button, action, requestedAt };
       })
       .filter(Boolean);
   }
@@ -1700,10 +1731,23 @@
     // file being ready, clicked a button that was not there, and died two
     // seconds into a ten-minute wait. The button IS the readiness signal, the
     // same way the BI exports wait for their row to stop saying Processing.
+    // Only a row this run actually created will do.
+    //
+    // Reports 1-7 get this for free: they snapshot the panel before clicking
+    // Export and insist on a row that was not there before, because Shopee
+    // answers a rate-limited export with a toast rather than an error and
+    // would otherwise leave us downloading the previous report. Orders need
+    // the same guard and cannot use the same trick — the export is requested
+    // on one page and collected on another — so freshness is judged by the
+    // Request Time column instead.
+    const after = Number(params.requestedAfter || 0);
+    const isOurs = (r) =>
+      r.name.toLowerCase() === wanted && (!after || r.requestedAt >= after);
+
     await waitFor(
       () => {
-        const hit = orderReportRows().find((r) => r.name.toLowerCase() === wanted);
-        return hit && hit.button ? hit : null;
+        const hit = orderReportRows().find((r) => isOurs(r) && r.button);
+        return hit || null;
       },
       // Short: the table does not repaint itself, so readiness arrives with
       // the background's next reload. This only covers the pinned Action
@@ -1713,12 +1757,15 @@
     );
 
     const listed = orderReportRows();
-    const hit = listed.find((r) => r.name.toLowerCase() === wanted);
+    const hit = listed.find(isOurs);
+    const sameNameAny = listed.find((r) => r.name.toLowerCase() === wanted);
     return {
       ok: true,
-      found: !!(hit && hit.button), // ready to click
-      listedRow: !!hit, // present, but Shopee may still be building it
+      found: !!(hit && hit.button), // ours, and ready to click
+      listedRow: !!hit, // ours, but Shopee may still be building it
+      staleOnly: !hit && !!sameNameAny, // an older file of the same name exists
       action: hit ? hit.action : '',
+      requestedAt: hit ? hit.requestedAt : sameNameAny ? sameNameAny.requestedAt : 0,
       listed: listed.length,
       names: listed.slice(0, 6).map((r) => r.name),
       withButtons: listed.filter((r) => r.button).length
@@ -1729,7 +1776,12 @@
    *  watcher catch the file. */
   async function downloadOrderReport(params) {
     const wanted = String(params.expectedName || '').toLowerCase();
-    const row = orderReportRows().find((r) => r.name.toLowerCase() === wanted);
+    const after = Number(params.requestedAfter || 0);
+    // Same freshness test as findOrderReport. Matching on name alone here
+    // would hand back an identically named file from an earlier run.
+    const row = orderReportRows().find(
+      (r) => r.name.toLowerCase() === wanted && (!after || r.requestedAt >= after)
+    );
     if (!row) throw new AppError(ORDER_ERR.NO_REPORT_ROW);
     if (!row.button) throw new AppError(ORDER_ERR.NO_DOWNLOAD_BUTTON);
 
