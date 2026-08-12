@@ -1,7 +1,7 @@
 {
-    "version":  "1.11.5",
+    "version":  "1.12.0",
     "notes":  [
-                  "Orders exports now refuse an identically named file from an earlier run, matching the stale-report guard the other reports already had"
+                  "One run mode, and the two Orders reports now run in their own tabs alongside the rest instead of before and after"
               ],
     "files":  [
                   "background/background.js",

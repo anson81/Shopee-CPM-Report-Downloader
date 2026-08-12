@@ -16,7 +16,6 @@ const ICONS = {
 };
 
 const el = {
-  runSteady: document.getElementById('run-steady'),
   runFurious: document.getElementById('run-furious'),
   cancel: document.getElementById('cancel'),
   picker: document.getElementById('picker'),
@@ -63,8 +62,7 @@ function buildPicker() {
     button.type = 'button';
     button.textContent = String(def.id);
     button.title = def.name;
-    // A single report has nothing to parallelise, so it always runs steady.
-    button.addEventListener('click', () => start([def.id], 'steady'));
+    button.addEventListener('click', () => start([def.id]));
     el.picker.appendChild(button);
   }
 }
@@ -122,29 +120,24 @@ function formatWhen(ts) {
   });
 }
 
-const LABELS = {
-  steady: ['🐌 Slow n Steady', 'One tab at a time · ~12 min'],
-  furious: ['🏎 Fast n Furious', 'All tabs at once · ~4 min']
-};
+const RUN_LABEL = ['🏎 Fast n Furious', 'All tabs at once · ~6 min'];
 
-function setButton(button, mode, running, activeMode) {
-  const [title, sub] = LABELS[mode];
+function setButton(button, running) {
+  const [title, sub] = RUN_LABEL;
   button.disabled = running;
   button.innerHTML = '';
   button.append(
-    running && activeMode === mode ? 'Running…' : title,
+    running ? 'Running…' : title,
     Object.assign(document.createElement('small'), {
-      textContent: running && activeMode === mode ? 'in progress' : sub
+      textContent: running ? 'in progress' : sub
     })
   );
 }
 
 function render(runState, lastRun) {
   const running = !!(runState && runState.running);
-  const activeMode = (runState && runState.mode) || 'steady';
 
-  setButton(el.runSteady, 'steady', running, activeMode);
-  setButton(el.runFurious, 'furious', running, activeMode);
+  setButton(el.runFurious, running);
   el.cancel.hidden = !running;
   for (const button of el.picker.querySelectorAll('button')) {
     button.disabled = running;
@@ -157,10 +150,9 @@ function render(runState, lastRun) {
 
   if (lastRun) {
     const mark = lastRun.done === lastRun.total ? '✓' : '✗';
-    const how = lastRun.mode === 'furious' ? '🏎' : '🐌';
     // Show the run's own sub-folder — that is where the files actually are.
     const where = lastRun.runFolder || lastRun.folder;
-    el.lastRun.textContent = `Last run: ${how} ${lastRun.done}/${lastRun.total} ${mark} (${formatWhen(
+    el.lastRun.textContent = `Last run: ${lastRun.done}/${lastRun.total} ${mark} (${formatWhen(
       lastRun.at
     )})${where ? ' → ' + where : ''}`;
   } else {
@@ -174,16 +166,15 @@ async function refresh() {
   render(res.state, res.lastRun);
 }
 
-async function start(ids, mode) {
+async function start(ids) {
   showBanner('');
-  const res = await send({ type: 'run', ids, mode });
+  const res = await send({ type: 'run', ids });
   if (res && res.ok === false && res.error) showBanner(res.error);
   setTimeout(refresh, 200);
 }
 
 const allIds = () => exportDefs.map((d) => d.id);
-el.runSteady.addEventListener('click', () => start(allIds(), 'steady'));
-el.runFurious.addEventListener('click', () => start(allIds(), 'furious'));
+el.runFurious.addEventListener('click', () => start(allIds()));
 // Opens the file manager at the dated folder, via the last saved file.
 el.openFolder.addEventListener('click', async () => {
   el.openFolder.disabled = true;

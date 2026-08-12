@@ -983,36 +983,14 @@
   }
 
   /**
-   * Export a BI report and download the row it created.
+   * Wait for the row created by an Export click and download it.
    *
    * Never clicks "the first Download in the panel" — the newest row may show
    * the status text "Downloaded" and have no button at all, in which case the
    * first button belongs to an older, unrelated report.
-   */
-  async function downloadBIReport(fallbackBase) {
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      const before = readReportRows();
-      report(
-        attempt === 1
-          ? 'Clicking Export Data…'
-          : `Clicking Export Data (attempt ${attempt})…`
-      );
-      await clickExportBI();
-      await wait(5000); // spec: report generation triggered
-
-      const result = await collectBIReport(before, fallbackBase, true);
-      if (result) return result;
-      // rate-limited or nothing new appeared — try the whole cycle again
-    }
-    throw new AppError(ERR.NO_NEW_REPORT);
-  }
-
-  /**
-   * Wait for the row created by an Export click and download it.
    *
-   * `retryable` is set by Slow n Steady, which can click Export again; it makes
-   * a rate-limit or a no-show return null instead of throwing. Fast n Furious
-   * has already moved on from the trigger, so it wants the error.
+   * `retryable` is a leftover from the single-tab mode that could click Export
+   * again; nothing sets it now, so a rate-limit or a no-show throws.
    */
   async function collectBIReport(before, fallbackBase, retryable) {
     const outcome = await awaitNewReportRow(before, 300000, 'Latest Reports');
@@ -1808,17 +1786,18 @@
     return typeof ms === 'number' && ms >= 0 ? ms : 15000;
   }
   /**
-   * An export is three separable steps. Slow n Steady runs them back to back
-   * in one tab. Fast n Furious runs each step across ALL tabs before moving
-   * to the next, so that seven reports generate on Shopee's side at the same
-   * time instead of one after another.
+   * An export is three separable steps. The background runs each step across
+   * ALL tabs before moving to the next, so that ten reports generate on
+   * Shopee's side at the same time instead of one after another.
    *
    *   prepare  select the data period, wait for the table to load
    *   trigger  click Export Data (fast; the report then generates remotely)
    *   collect  wait for the finished row and download it
    *
    * `pending` carries the panel snapshot from trigger to collect, which is
-   * safe because the tab never navigates between the two.
+   * safe because the tab never navigates between the two. The Orders exports
+   * are the exception and are collected by the background, which navigates
+   * their tab to My Reports first.
    */
   let pending = null;
   /** Export-job ids that existed before the GMV Max Confirm click. */
@@ -1826,6 +1805,10 @@
 
   /** Phase 1 — get this tab showing the right data period. */
   async function prepareExport(exportDef, params) {
+    // Orders have their own page to settle and their own idea of "ready",
+    // but they go through the same three phases as everything else.
+    if (exportDef.kind === 'order') return prepareOrderExport(params);
+
     report('Waiting for the page to render…');
     await wait(spaWait(params)); // spec: non-negotiable SPA wait
 
@@ -1868,6 +1851,8 @@
 
   /** Phase 2 — ask Shopee to build the report. Deliberately does not wait. */
   async function triggerExport(exportDef, params) {
+    if (exportDef.kind === 'order') return triggerOrderExport(params);
+
     // Snapshot the panel first, so the row this click creates can be told
     // apart from reports that were already listed.
     const before = readReportRows();
@@ -1915,20 +1900,6 @@
     return collectBIReport(before, params.fallbackBase);
   }
 
-  /* --- Slow n Steady: the three phases run together ------------------- */
-  async function runBiExport(exportDef, params) {
-    await prepareExport(exportDef, params);
-    // downloadBIReport owns the Export click here: it retries the whole
-    // trigger-and-wait cycle if Shopee pushes back.
-    return downloadBIReport(params.fallbackBase);
-  }
-
-  async function runAdsExport(exportDef, params) {
-    await prepareExport(exportDef, params);
-    await triggerExport(exportDef, params);
-    return collectExport(exportDef, params);
-  }
-
   /* ================================================================== *
    * Message router
    * ================================================================== */
@@ -1946,34 +1917,15 @@
         }
       }
 
-      case 'runExport': {
-        cancelled = false;
-        startHeartbeat();
-        try {
-          const def = msg.export;
-          const params = msg.params || {};
-          const result =
-            def.kind === 'ads'
-              ? await runAdsExport(def, params)
-              : await runBiExport(def, params);
-          return { ok: true, filename: result.filename, via: result.via };
-        } finally {
-          stopHeartbeat();
-        }
-      }
-
-      // Orders: queued on one page, collected from another, so the background
-      // drives these four steps with a navigation in between.
-      case 'prepareOrderExport':
-      case 'triggerOrderExport':
+      // Orders are prepared and triggered through the ordinary phase messages
+      // above. Only collection needs its own pair, because the file is picked
+      // up from a different page and the background owns navigation.
       case 'findOrderReport':
       case 'downloadOrderReport': {
         cancelled = false;
         startHeartbeat();
         try {
           const params = msg.params || {};
-          if (msg.type === 'prepareOrderExport') return await prepareOrderExport(params);
-          if (msg.type === 'triggerOrderExport') return await triggerOrderExport(params);
           if (msg.type === 'findOrderReport') return await findOrderReport(params);
           return await downloadOrderReport(params);
         } finally {

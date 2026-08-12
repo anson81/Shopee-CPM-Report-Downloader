@@ -70,7 +70,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const state = {
   running: false,
   cancel: false,
-  mode: 'steady',
+  mode: 'furious',
   tabId: null,
   tabIds: [],
   folder: null,
@@ -883,6 +883,16 @@ const ORDER_TIMEOUT_MS = 600000; // 10 min — the same patience GMV Max gets
 const orderRequestedAt = new Map();
 const ORDER_TIME_SLACK_MS = 120000;
 
+/** How many Orders exports this run is actually doing. */
+function selectedOrderCount() {
+  return EXPORTS.filter(
+    (e) =>
+      e.kind === 'order' &&
+      state.results[e.id] &&
+      state.results[e.id].status !== 'skipped'
+  ).length;
+}
+
 /** One line in orders-log.txt. */
 function logOrder(message) {
   const now = new Date();
@@ -898,37 +908,7 @@ function describeError(e) {
   return `${e.name || 'Error'}: ${message}${stack}`;
 }
 
-async function queueOrderExport(ex) {
-  setResult(ex.id, { status: 'running', detail: 'Opening the Orders page…' });
-  logOrder(`#${ex.id} queue: opening ${ORDER_URL}`);
-  const tabId = await ensureTab();
-  await navigate(tabId, ORDER_URL);
-  await waitForContentScript(tabId);
-  logOrder(`#${ex.id} queue: page ready, content script answering`);
-
-  const params = computeParams(ex, state.realtimeDate);
-  await sendToContent(tabId, { type: 'prepareOrderExport', params });
-
-  setResult(ex.id, { detail: `Requesting ${params.orderRangeText}…` });
-  logOrder(`#${ex.id} queue: asking for ${params.orderRangeText} -> ${params.expectedName}`);
-  // Stamped before the click, so any row Shopee creates for it is at or after
-  // this moment. See orderRequestedAt.
-  orderRequestedAt.set(ex.id, Date.now());
-  const res = await sendToContent(tabId, { type: 'triggerOrderExport', params });
-  if (!res) throw new AppError(ERR.TAB_GONE);
-  if (res.cancelled) throw new AppError(ERR.CANCELLED);
-  if (!res.ok) {
-    throw new AppError(res.error || 'Could not request the orders export.');
-  }
-
-  if (res.rateLimited) {
-    logOrder(`#${ex.id} queue: RATE LIMITED by Shopee ("${res.toast}")`);
-  }
-  logOrder(`#${ex.id} queue: requested OK`);
-  setResult(ex.id, { detail: 'Generating on Shopee…' });
-}
-
-async function collectOrderExport(ex) {
+async function collectOrderExport(ex, tabId) {
   const params = computeParams(ex, state.realtimeDate);
   const askedAt = orderRequestedAt.get(ex.id) || 0;
   params.requestedAfter = askedAt ? askedAt - ORDER_TIME_SLACK_MS : 0;
@@ -938,7 +918,6 @@ async function collectOrderExport(ex) {
   state.expectedName = params.expectedName;
   persistRun();
 
-  const tabId = await ensureTab();
   let saw = null; // what the last look at My Reports actually turned up
   let round = 0;
   logOrder(`#${ex.id} collect: looking for ${params.expectedName}`);
@@ -1013,42 +992,6 @@ async function collectOrderExport(ex) {
 }
 
 /**
- * Slow n Steady: navigate the one tab, then run all three phases of the
- * export in a single content-script call.
- */
-async function runOne(ex) {
-  state.currentId = ex.id;
-  state.watch = { armed: false, capturedId: null, capturedName: '' };
-  state.expectedName = ''; // never let one export's name land on another's file
-  persistRun();
-  setResult(ex.id, { status: 'running', detail: 'Opening page…', error: '' });
-
-  const tabId = await ensureTab();
-  await navigate(tabId, ex.url);
-  await waitForContentScript(tabId);
-  setResult(ex.id, { detail: 'Waiting for Shopee to render…' });
-
-  const res = await sendToContent(tabId, {
-    type: 'runExport',
-    export: ex,
-    params: computeParams(ex, state.realtimeDate)
-  });
-
-  if (!res) throw new AppError(ERR.TAB_GONE);
-  if (res.cancelled) throw new AppError(ERR.CANCELLED);
-  if (!res.ok) {
-    throw new AppError(
-      res.error ||
-        `Unexpected error during Export #${ex.id}. Try downloading this report manually.`
-    );
-  }
-
-  const name = await confirmDownload(res);
-  assertNotStale(ex, name);
-  setResult(ex.id, { status: 'done', filename: name, detail: name });
-}
-
-/**
  * Every BI report encodes its own date range in the filename, so two exports
  * in one run cannot legitimately produce the same name. If they do, Shopee
  * served us an older row instead of the report we just asked for — better to
@@ -1074,44 +1017,27 @@ function assertNotStale(ex, filename) {
   );
 }
 
-// Shopee refuses a second export inside roughly a minute of the last one and
-// answers with a toast, not an error — which used to leave us downloading the
-// previous report. Space the exports out instead of racing the limit.
-// Slow n Steady keeps the conservative spacing. Fast n Furious relies on the
-// observation that exports for DIFFERENT periods do not contend, and leaves
-// only a token gap — the content script still detects a rate-limit toast and
-// waits it out if Shopee disagrees.
-const COOLDOWN_MS = { steady: 65000, furious: 3000 };
-
-async function respectCooldown(next, mode) {
-  const budget = COOLDOWN_MS[mode] || COOLDOWN_MS.steady;
-  let remaining = budget - (Date.now() - (state.lastExportAt || 0));
-  while (remaining > 0) {
-    if (state.cancel) return;
-    if (budget > 10000) {
-      setResult(next.id, {
-        detail: `Waiting out Shopee's export cooldown… ${Math.ceil(remaining / 1000)}s`
-      });
-    }
-    await sleep(Math.min(2000, remaining));
-    remaining = budget - (Date.now() - (state.lastExportAt || 0));
-  }
-}
-
 /**
- * Fast n Furious.
+ * Fast n Furious — the only way a run happens.
  *
  * One tab per export, then every tab is walked through each phase before the
  * next phase begins:
  *
- *   load     all 7 pages fetch and render at the same time
+ *   load     all 10 pages fetch and render at the same time
  *   prepare  each tab gets its data period selected
  *   trigger  every Export button is clicked, back to back
  *   collect  the finished reports are downloaded
  *
- * Separating trigger from collect is the whole point: Shopee builds all seven
+ * Separating trigger from collect is the whole point: Shopee builds all ten
  * reports concurrently while we are still clicking, instead of us waiting out
- * each one before starting the next.
+ * each one before starting the next. It matters most for the Orders exports,
+ * which Shopee builds server-side over a minute or two — by the time we come
+ * back for them, they are done.
+ *
+ * Shopee refuses a second export of the SAME kind too soon after the last and
+ * answers with a toast rather than an error. Exports for different periods do
+ * not contend, so the phases only pause between the two Orders requests; the
+ * content script detects the toast and waits it out if Shopee disagrees.
  *
  * Tabs are still driven one at a time within a phase — Chrome throttles timers
  * in background tabs, so the tab being touched has to be the visible one.
@@ -1166,6 +1092,15 @@ async function runPhase(slots, phase, label) {
       const params = computeParams(slot.ex, state.realtimeDate);
       params.initialWaitMs = 2000; // preloadTabs already did the long settle
 
+      if (phase === 'triggerExport' && slot.ex.kind === 'order') {
+        // Stamped before the click, so any row Shopee creates for it is at or
+        // after this moment. See orderRequestedAt.
+        orderRequestedAt.set(slot.ex.id, Date.now());
+        logOrder(
+          `#${slot.ex.id} trigger: asking for ${params.orderRangeText} -> ${params.expectedName}`
+        );
+      }
+
       const res = await sendToContent(slot.tabId, {
         type: phase,
         export: slot.ex,
@@ -1174,6 +1109,19 @@ async function runPhase(slots, phase, label) {
       if (!res) throw new AppError(ERR.TAB_GONE);
       if (res.cancelled) throw new AppError(ERR.CANCELLED);
       if (!res.ok) throw new AppError(res.error || `${phase} failed.`);
+
+      if (phase === 'triggerExport' && slot.ex.kind === 'order') {
+        if (res.rateLimited) {
+          logOrder(`#${slot.ex.id} trigger: RATE LIMITED ("${res.toast}")`);
+        } else {
+          logOrder(`#${slot.ex.id} trigger: requested OK`);
+        }
+        // Space the two Orders requests. Both hit the same page, and Shopee
+        // turns down a repeat it thinks is too soon with a toast rather than
+        // an error. 34s apart was seen working; this keeps a similar margin
+        // without holding up the other reports, which are already triggered.
+        if (selectedOrderCount() > 1) await sleep(15000);
+      }
 
       slot.lastResult = res;
       survivors.push(slot);
@@ -1212,6 +1160,16 @@ async function runFurious(selected) {
       await sleep(250);
       setResult(slot.ex.id, { detail: 'Downloading…' });
 
+      // Orders are collected from a different page than they were requested
+      // on, so this one drives its own tab there and waits for the file to be
+      // built. Same tab, same slot, same place in the run as everything else.
+      if (slot.ex.kind === 'order') {
+        await collectOrderExport(slot.ex, slot.tabId);
+        done++;
+        await closeTabs([slot.tabId]);
+        continue;
+      }
+
       const params = computeParams(slot.ex, state.realtimeDate);
       params.initialWaitMs = 2000;
 
@@ -1231,6 +1189,9 @@ async function runFurious(selected) {
       await closeTabs([slot.tabId]);
     } catch (e) {
       const message = (e && e.message) || String(e);
+      if (slot.ex.kind === 'order') {
+        logOrder(`#${slot.ex.id} collect FAILED: ${describeError(e)}`);
+      }
       if (message === ERR.CANCELLED || message === ERR.NOT_LOGGED_IN) throw e;
       setResult(slot.ex.id, { status: 'error', detail: '', error: message });
     }
@@ -1290,7 +1251,9 @@ async function runExports(ids, mode) {
   state.running = true;
   state.cancel = false;
   state.realtimeDate = await getRealtimeDate();
-  state.mode = mode === 'furious' ? 'furious' : 'steady';
+  // Kept in the state so old popups and stored run records still read; there
+  // is only one way to run now.
+  state.mode = 'furious';
   state.error = '';
   state.startedAt = Date.now();
   state.finishedAt = null;
@@ -1335,74 +1298,19 @@ async function runExports(ids, mode) {
     return { ok: true, done, total: selected.length };
   }
 
-  // Orders are asynchronous, so they sit outside the normal machinery: queued
-  // before everything else, collected after it. See queueOrderExport().
-  const orders = queue.filter((ex) => ex.kind === 'order');
-  const rest = queue.filter((ex) => ex.kind !== 'order');
-  const queued = [];
-
   try {
     setResult(queue[0].id, { detail: 'Checking Shopee login…' });
     await checkLogin();
 
-    // One at a time: two export requests seconds apart risk the same rate
-    // limit that already bites the BI exports.
-    for (const ex of orders) {
-      if (state.cancel) throw new AppError(ERR.CANCELLED);
-      try {
-        await queueOrderExport(ex);
-        queued.push(ex);
-        // A gap between the two requests. 34s apart was observed working on
-        // 12 Aug, and 5s was never tested — the BI exports need 65s, so some
-        // margin is worth 15 seconds of a run that waits minutes anyway.
-        await sleep(20000);
-      } catch (e) {
-        const message = e && e.message ? e.message : String(e);
-        logOrder(`#${ex.id} queue FAILED: ${describeError(e)}`);
-        if (message === ERR.NOT_LOGGED_IN || message === ERR.CANCELLED) throw e;
-        setResult(ex.id, { status: 'error', detail: '', error: message });
-      }
-    }
+    // One way to run: a tab per report, phase by phase across all of them.
+    // See runFurious(). Orders are ordinary slots in it — they just collect
+    // from a different page than they were requested on.
+    await closeTabs([state.tabId].filter((id) => id != null));
+    done += await runFurious(queue);
 
-    if (state.mode === 'furious') {
-      // Phase-by-phase across every tab — see runFurious().
-      await closeTabs([state.tabId].filter((id) => id != null));
-      if (rest.length) done += await runFurious(rest);
-    } else {
-      // One tab, one export at a time, with the conservative cooldown.
-      for (let i = 0; i < rest.length; i++) {
-        if (state.cancel) throw new AppError(ERR.CANCELLED);
-        const ex = rest[i];
-        try {
-          await runOne(ex);
-          done++;
-        } catch (e) {
-          const message = e && e.message ? e.message : String(e);
-          if (message === ERR.NOT_LOGGED_IN || message === ERR.CANCELLED) throw e;
-          setResult(ex.id, { status: 'error', detail: '', error: message });
-        }
-        state.lastExportAt = Date.now();
-        if (i < rest.length - 1) await respectCooldown(rest[i + 1], state.mode);
-      }
-    }
-
-    // Shopee has had the whole run to build these.
-    for (const ex of queued) {
-      if (state.cancel) throw new AppError(ERR.CANCELLED);
-      state.currentId = ex.id;
-      try {
-        await collectOrderExport(ex);
-        done++;
-      } catch (e) {
-        const message = e && e.message ? e.message : String(e);
-        logOrder(`#${ex.id} collect FAILED: ${describeError(e)}`);
-        if (message === ERR.CANCELLED) throw e;
-        setResult(ex.id, { status: 'error', detail: '', error: message });
-      }
-    }
   } catch (e) {
     const message = e && e.message ? e.message : String(e);
-    if (orders.length) logOrder(`run ABORTED: ${describeError(e)}`);
+    if (state.orderLog.length) logOrder(`run ABORTED: ${describeError(e)}`);
     state.error = message;
     // Anything still queued never got its chance.
     for (const ex of selected) {

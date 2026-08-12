@@ -49,26 +49,23 @@ The orange icon appears in your toolbar. Pin it if you like.
 
 1. Log in to [Shopee Seller Centre](https://seller.shopee.com.my) as you normally would
 2. Click the orange icon
-3. Pick a mode:
-
-| Mode | What it does | Time |
-|------|--------------|------|
-| 🐌 **Slow n Steady** | One tab at a time. The safe option. | ~14 min |
-| 🏎 **Fast n Furious** | Opens the pages together, then collects them. | ~6 min |
-
+3. Click 🏎 **Fast n Furious** — about 6 minutes
 4. **Leave the window open and don't touch it** while it runs
 5. When it finishes, click **Open folder** to see your files
 
-Both modes produce identical files. Use Slow n Steady if Fast n Furious ever
-gives you trouble.
+It opens one tab per report, asks Shopee for all ten at once, and collects them
+as they finish. You can also click a single number (1–10) to fetch just that
+one report.
 
-You can also click a single number (1–10) to download just that one report.
+**The two Orders reports take longer to arrive.** Shopee does not hand those
+over on the spot — it builds them on its own servers and publishes them to My
+Reports a minute or two later. The run asks early and picks them up at the end,
+so the wait overlaps with everything else. If the last stretch of a run looks
+idle, that is what it is doing.
 
-**The two Orders reports work differently.** Shopee does not hand those over on
-the spot — it builds them in the background and publishes them to My Reports a
-few minutes later. So the run asks for them first, fetches everything else while
-Shopee works, and collects them at the end. If the last minute of a run looks
-like nothing is happening, that is what it is doing.
+Each run folder also gets a small **`orders-log.txt`** recording what those two
+did, step by step. Ignore it, or delete it — it is there so a failure can be
+explained rather than guessed at.
 
 ### Choosing an earlier day
 
