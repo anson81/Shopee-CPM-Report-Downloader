@@ -1,7 +1,7 @@
 {
-    "version":  "1.11.1",
+    "version":  "1.11.2",
     "notes":  [
-                  "Fixes the Orders exports: the modal, the date picker and the Download button are all found correctly now"
+                  "Collect step waits for My Reports to render, and says what it saw if the report never appears"
               ],
     "files":  [
                   "background/background.js",

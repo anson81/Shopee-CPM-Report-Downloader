@@ -1665,15 +1665,44 @@
       .filter(Boolean);
   }
 
-  /** Is the report we asked for listed yet? The background calls this between
-   *  reloads, because the background owns navigation. */
+  /**
+   * Is the report we asked for listed yet?
+   *
+   * Called by the background between reloads, because the background owns
+   * navigation. It waits for the table itself: "complete" only means the
+   * document finished, and My Reports fills its rows from a later request —
+   * answering the instant the page loads is answering before there is
+   * anything to see.
+   *
+   * Reports back what it DID see either way. A silent false gives the popup
+   * nothing to show but "waiting", for ten minutes, which is what made the
+   * first collect failure so hard to place.
+   */
   async function findOrderReport(params) {
     const wanted = String(params.expectedName || '').toLowerCase();
-    const rows = orderReportRows();
+
+    // Make sure we are on the Order Export tab before reading anything.
+    const chip = $$vis('.eds-chip').find((c) => /^Order Export$/i.test(squash(c.innerText)));
+    if (chip && !/eds-chip--active/.test(chip.className)) {
+      fullClick(chip);
+      await wait(1500);
+    }
+
+    const rows = await waitFor(
+      () => {
+        const found = orderReportRows();
+        return found.length ? found : null;
+      },
+      { timeout: 15000 }
+    );
+
+    const listed = rows || [];
     return {
       ok: true,
-      found: rows.some((r) => r.name.toLowerCase() === wanted),
-      listed: rows.length
+      found: listed.some((r) => r.name.toLowerCase() === wanted),
+      listed: listed.length,
+      names: listed.slice(0, 6).map((r) => r.name),
+      withButtons: listed.filter((r) => r.button).length
     };
   }
 

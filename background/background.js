@@ -896,6 +896,7 @@ async function collectOrderExport(ex) {
   persistRun();
 
   const tabId = await ensureTab();
+  let saw = null; // what the last look at My Reports actually turned up
   for (;;) {
     if (state.cancel) throw new AppError(ERR.CANCELLED);
     setResult(ex.id, { detail: `Waiting for ${params.expectedName}…` });
@@ -903,13 +904,21 @@ async function collectOrderExport(ex) {
     await navigate(tabId, REPORTS_URL);
     await waitForContentScript(tabId);
     const found = await sendToContent(tabId, { type: 'findOrderReport', params });
+    if (found && found.ok) saw = found;
     if (found && found.ok && found.found) break;
 
     if (Date.now() > deadline) {
+      // Say what was on the page. A bare timeout gave no way to tell "Shopee
+      // is still building it" apart from "we are reading the page wrong",
+      // which are very different problems with the same symptom.
+      const detail = saw
+        ? `My Reports listed ${saw.listed} report(s)` +
+          (saw.names && saw.names.length ? `: ${saw.names.join(', ')}` : '') +
+          '.'
+        : 'My Reports could not be read at all.';
       throw new AppError(
-        `Shopee did not finish ${params.expectedName} within 10 minutes. ` +
-          'It may still be building — open My Reports later and download it ' +
-          'by hand, or re-run this export on its own.'
+        `Waited 10 minutes for ${params.expectedName} and it never appeared. ` +
+          `${detail} Download it by hand from My Reports, or re-run this export on its own.`
       );
     }
     await sleep(ORDER_POLL_MS);
