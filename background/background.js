@@ -85,6 +85,11 @@ const state = {
   realtimeDate: '', // Real Time pinned to an earlier day, or '' for today
   error: '',
   results: {},
+  // Step-by-step trace of the Orders exports, written into the run folder as
+  // orders-log.txt. The popup can only show one line per report, and a run
+  // that ends with a blank row leaves nothing at all to go on — a service
+  // worker's console is gone by the time anyone thinks to look.
+  orderLog: [],
   // Download watcher, armed by the content script just before it clicks.
   watch: { armed: false, capturedId: null, capturedName: '' }
 };
@@ -867,16 +872,34 @@ async function checkLogin() {
 const ORDER_POLL_MS = 15000;
 const ORDER_TIMEOUT_MS = 600000; // 10 min — the same patience GMV Max gets
 
+/** One line in orders-log.txt. */
+function logOrder(message) {
+  const now = new Date();
+  const stamp = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  state.orderLog.push(`${stamp}  ${message}`);
+}
+
+/** Everything we know about a thrown value, including where it came from. */
+function describeError(e) {
+  if (!e) return 'undefined error';
+  const message = e.message || String(e);
+  const stack = e.stack ? ` | ${String(e.stack).split('\n').slice(0, 3).join(' <- ')}` : '';
+  return `${e.name || 'Error'}: ${message}${stack}`;
+}
+
 async function queueOrderExport(ex) {
   setResult(ex.id, { status: 'running', detail: 'Opening the Orders page…' });
+  logOrder(`#${ex.id} queue: opening ${ORDER_URL}`);
   const tabId = await ensureTab();
   await navigate(tabId, ORDER_URL);
   await waitForContentScript(tabId);
+  logOrder(`#${ex.id} queue: page ready, content script answering`);
 
   const params = computeParams(ex, state.realtimeDate);
   await sendToContent(tabId, { type: 'prepareOrderExport', params });
 
   setResult(ex.id, { detail: `Requesting ${params.orderRangeText}…` });
+  logOrder(`#${ex.id} queue: asking for ${params.orderRangeText} -> ${params.expectedName}`);
   const res = await sendToContent(tabId, { type: 'triggerOrderExport', params });
   if (!res) throw new AppError(ERR.TAB_GONE);
   if (res.cancelled) throw new AppError(ERR.CANCELLED);
@@ -884,6 +907,7 @@ async function queueOrderExport(ex) {
     throw new AppError(res.error || 'Could not request the orders export.');
   }
 
+  logOrder(`#${ex.id} queue: requested OK`);
   setResult(ex.id, { detail: 'Generating on Shopee…' });
 }
 
@@ -897,13 +921,22 @@ async function collectOrderExport(ex) {
 
   const tabId = await ensureTab();
   let saw = null; // what the last look at My Reports actually turned up
+  let round = 0;
+  logOrder(`#${ex.id} collect: looking for ${params.expectedName}`);
   for (;;) {
     if (state.cancel) throw new AppError(ERR.CANCELLED);
     setResult(ex.id, { detail: `Waiting for ${params.expectedName}…` });
+    round++;
 
     await navigate(tabId, REPORTS_URL);
     await waitForContentScript(tabId);
     const found = await sendToContent(tabId, { type: 'findOrderReport', params });
+    logOrder(
+      `#${ex.id} collect: look ${round} -> ` +
+        (found && found.ok
+          ? `found=${found.found} listed=${found.listed} buttons=${found.withButtons} [${(found.names || []).join(', ')}]`
+          : `no usable answer (${JSON.stringify(found)})`)
+    );
     if (found && found.ok) saw = found;
     if (found && found.ok && found.found) break;
 
@@ -925,6 +958,7 @@ async function collectOrderExport(ex) {
   }
 
   setResult(ex.id, { detail: 'Downloading…' });
+  logOrder(`#${ex.id} collect: clicking Download`);
   const res = await sendToContent(tabId, { type: 'downloadOrderReport', params });
   if (!res) throw new AppError(ERR.TAB_GONE);
   if (res.cancelled) throw new AppError(ERR.CANCELLED);
@@ -932,7 +966,12 @@ async function collectOrderExport(ex) {
     throw new AppError(res.error || 'Could not download the orders report.');
   }
 
+  logOrder(
+    `#${ex.id} collect: clicked, watcher captured id=${state.watch.capturedId} ` +
+      `name=${state.watch.capturedName || '(none)'}`
+  );
   const name = await confirmDownload(res);
+  logOrder(`#${ex.id} collect: saved as ${name}`);
   setResult(ex.id, { status: 'done', filename: name, detail: name });
 }
 
@@ -1224,6 +1263,7 @@ async function runExports(ids, mode) {
   state.folder = dateFolder(day);
   state.runFolder = runFolder(day, startedAt);
   state.results = blankResults(ids);
+  state.orderLog = [];
   state.tabIds = [];
   state.tabId = null;
   persist();
@@ -1278,6 +1318,7 @@ async function runExports(ids, mode) {
         await sleep(5000);
       } catch (e) {
         const message = e && e.message ? e.message : String(e);
+        logOrder(`#${ex.id} queue FAILED: ${describeError(e)}`);
         if (message === ERR.NOT_LOGGED_IN || message === ERR.CANCELLED) throw e;
         setResult(ex.id, { status: 'error', detail: '', error: message });
       }
@@ -1314,12 +1355,14 @@ async function runExports(ids, mode) {
         done++;
       } catch (e) {
         const message = e && e.message ? e.message : String(e);
+        logOrder(`#${ex.id} collect FAILED: ${describeError(e)}`);
         if (message === ERR.CANCELLED) throw e;
         setResult(ex.id, { status: 'error', detail: '', error: message });
       }
     }
   } catch (e) {
     const message = e && e.message ? e.message : String(e);
+    if (orders.length) logOrder(`run ABORTED: ${describeError(e)}`);
     state.error = message;
     // Anything still queued never got its chance.
     for (const ex of selected) {
@@ -1329,6 +1372,20 @@ async function runExports(ids, mode) {
         row.error = message;
         row.detail = '';
       }
+    }
+  }
+
+  // Write the trace while the run folder is still the target — saveFile()
+  // depends on state.running and state.folder, which are cleared just below.
+  if (state.orderLog.length) {
+    try {
+      const text = state.orderLog.join('\r\n') + '\r\n';
+      await saveFile(
+        `data:text/plain;charset=utf-8,${encodeURIComponent(text)}`,
+        'orders-log.txt'
+      );
+    } catch (_) {
+      /* a missing log must never sink a run that otherwise worked */
     }
   }
 

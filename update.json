@@ -1,7 +1,7 @@
 {
-    "version":  "1.11.2",
+    "version":  "1.11.3",
     "notes":  [
-                  "Collect step waits for My Reports to render, and says what it saw if the report never appears"
+                  "Writes orders-log.txt into the run folder so the Orders failure can be diagnosed"
               ],
     "files":  [
                   "background/background.js",
