@@ -345,3 +345,112 @@ footer button:hover:not(:disabled) {
   border-color: var(--shopee);
   color: var(--shopee);
 }
+
+/* ------------------------------------------------------------------ *
+ * Run history — "What you've already fetched"
+ *
+ * Collapsed by default: it answers a question you only sometimes have
+ * ("did I already fetch today, and where did it go?") and should not
+ * push the progress list off the screen the rest of the time.
+ * ------------------------------------------------------------------ */
+.history {
+  margin-top: 14px;
+  font-size: 12px;
+}
+
+.history summary {
+  cursor: pointer;
+  padding: 7px 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.history .count {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.history-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  max-height: 190px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-soft);
+}
+
+.history-list li {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.history-list li:last-child {
+  border-bottom: 0;
+}
+
+.history-when {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.history-what {
+  margin-top: 2px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.history-detail {
+  font-size: 11px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.history-detail.error {
+  color: var(--err);
+}
+
+.history .tag {
+  display: inline-block;
+  flex: none;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 999px;
+  color: var(--ok);
+  background: #e8f5e9;
+}
+
+.history .tag.bad {
+  color: var(--err);
+  background: #fdecea;
+}
+
+.history-list .empty {
+  padding: 10px;
+  color: var(--muted);
+}
+
+.history .link {
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 11px;
+  color: var(--muted);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.history .link:hover {
+  color: var(--shopee);
+}

@@ -29,7 +29,11 @@ const el = {
   openFolder: document.getElementById('open-folder'),
   realtimeDate: document.getElementById('realtime-date'),
   realtimeClear: document.getElementById('realtime-clear'),
-  realtimeHint: document.getElementById('realtime-hint')
+  realtimeHint: document.getElementById('realtime-hint'),
+  historyBox: document.getElementById('history-box'),
+  historyCount: document.getElementById('history-count'),
+  history: document.getElementById('history'),
+  clearHistory: document.getElementById('clear-history')
 };
 
 let exportDefs = [];
@@ -134,6 +138,83 @@ function setButton(button, running) {
   );
 }
 
+/**
+ * Past runs, newest first.
+ *
+ * The question this answers is "did I already fetch today, and where did it
+ * go?" — worth being able to answer without digging through Downloads,
+ * because each run makes its own dated sub-folder and running twice in a day
+ * makes two.
+ */
+function renderHistory(history) {
+  el.history.textContent = '';
+
+  const today = new Date().toDateString();
+  const todayRuns = history.filter((h) => new Date(h.at).toDateString() === today);
+  el.historyCount.textContent = todayRuns.length
+    ? `· ${todayRuns.length} today`
+    : history.length
+      ? `· ${history.length}`
+      : '';
+
+  if (!history.length) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = 'Nothing yet. Runs will appear here.';
+    el.history.appendChild(li);
+    return;
+  }
+
+  for (const run of history) {
+    const li = document.createElement('li');
+
+    const head = document.createElement('div');
+    head.className = 'history-when';
+    head.appendChild(
+      Object.assign(document.createElement('span'), {
+        textContent: formatWhen(run.at)
+      })
+    );
+
+    const reports = run.reports || [];
+    const ok = reports.filter((r) => r.status === 'done').length;
+    const tag = document.createElement('span');
+    tag.className = ok === reports.length ? 'tag' : 'tag bad';
+    tag.textContent = `${ok}/${reports.length}`;
+    head.appendChild(tag);
+    li.appendChild(head);
+
+    // The sub-folder is where the files actually are.
+    const where = document.createElement('div');
+    where.className = 'history-what';
+    where.textContent = run.runFolder || run.folder || '';
+    li.appendChild(where);
+
+    if (run.covers) {
+      const covers = document.createElement('div');
+      covers.className = 'history-detail';
+      covers.textContent = `Real Time pinned to ${run.covers}`;
+      li.appendChild(covers);
+    }
+
+    // Only the failures are worth listing — a run where everything worked is
+    // fully described by "10/10" and its folder.
+    for (const report of reports.filter((r) => r.status !== 'done')) {
+      const detail = document.createElement('div');
+      detail.className = 'history-detail error';
+      detail.textContent = `#${report.id} ${report.name} — ${report.error || report.status}`;
+      li.appendChild(detail);
+    }
+
+    el.history.appendChild(li);
+  }
+}
+
+async function loadHistory() {
+  const res = await send({ type: 'getHistory' });
+  if (res && res.ok) renderHistory(res.history || []);
+}
+
 function render(runState, lastRun) {
   const running = !!(runState && runState.running);
 
@@ -201,6 +282,13 @@ el.cancel.addEventListener('click', async () => {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   if (changes.runState || changes.lastRun) refresh();
+  // A run just ended, so there is a new entry to show.
+  if (changes.history) loadHistory();
+});
+
+el.clearHistory.addEventListener('click', async () => {
+  await send({ type: 'clearHistory' });
+  await loadHistory();
 });
 
 /* ------------------------------------------------------------------ *
@@ -309,5 +397,6 @@ el.realtimeClear.addEventListener('click', () => setRealtimeDate(''));
 (async function init() {
   await loadExports();
   await refresh();
+  await loadHistory();
   checkUpdate(); // not awaited — never let a slow network hold up the UI
 })();

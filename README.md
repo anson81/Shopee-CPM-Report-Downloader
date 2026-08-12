@@ -68,6 +68,16 @@ If one of them ever fails, the run folder will also hold a small
 explained rather than guessed at. A run where everything worked leaves no such
 file.
 
+### What you've already fetched
+
+The popup keeps a list of past runs — when each one happened, which folder it
+saved into, and anything that failed. It answers "did I already run this
+morning, and where did the files go?" without digging through Downloads, which
+matters because every run makes its own dated sub-folder.
+
+The last 40 runs are kept. **Clear this list** empties it; it never touches the
+files themselves.
+
 ### Choosing an earlier day
 
 The best time to grab **Real Time** is late at night, when the day's data is

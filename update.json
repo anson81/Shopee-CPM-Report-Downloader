@@ -1,7 +1,7 @@
 {
-    "version":  "1.13.1",
+    "version":  "1.14.0",
     "notes":  [
-                  "orders-log.txt is only written when an Orders export fails, so a clean run leaves just the reports"
+                  "The popup now keeps a history of past runs - what you have already fetched, where it went, and anything that failed"
               ],
     "files":  [
                   "background/background.js",

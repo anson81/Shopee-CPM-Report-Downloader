@@ -856,6 +856,47 @@ async function checkLogin() {
   if (!res || !res.ok || !res.loggedIn) throw new AppError(ERR.NOT_LOGGED_IN);
 }
 
+/* -------------------------------------------------------------------- *
+ * Run history
+ *
+ * Ported from the SiteGiant twin. There, it answers "have I already pulled
+ * June?"; here the question is "did I already fetch today, and where did it
+ * go?" — which matters because the reports land in a dated sub-folder per run
+ * and a second run the same day makes another one.
+ *
+ * Records what was asked for and what came back, failures included. A run that
+ * went wrong is exactly the one worth being able to look at again.
+ * -------------------------------------------------------------------- */
+const HISTORY_LIMIT = 40;
+
+async function recordHistory(selected) {
+  const entry = {
+    at: Date.now(),
+    folder: state.folder,
+    runFolder: state.runFolder,
+    covers: state.realtimeDate || null, // set when Real Time was pinned
+    error: state.error || '',
+    reports: selected.map((ex) => {
+      const result = state.results[ex.id] || {};
+      return {
+        id: ex.id,
+        name: ex.name,
+        status: result.status || 'unknown',
+        filename: result.filename || '',
+        error: result.error || ''
+      };
+    })
+  };
+
+  try {
+    const { history = [] } = await chrome.storage.local.get('history');
+    history.unshift(entry);
+    await chrome.storage.local.set({ history: history.slice(0, HISTORY_LIMIT) });
+  } catch (_) {
+    /* history is a convenience — never let it sink a finished run */
+  }
+}
+
 /** How many Orders exports this run is actually doing. */
 function selectedOrderCount() {
   return EXPORTS.filter(
@@ -1239,6 +1280,8 @@ async function runExports(ids, mode) {
   persistRun();
   stopKeepAlive();
 
+  await recordHistory(selected);
+
   const total = selected.length;
   await chrome.storage.local.set({
     lastRun: {
@@ -1395,6 +1438,15 @@ async function handle(msg, sender) {
         }))
       };
     }
+
+    case 'getHistory': {
+      const { history = [] } = await chrome.storage.local.get('history');
+      return { ok: true, history };
+    }
+
+    case 'clearHistory':
+      await chrome.storage.local.remove('history');
+      return { ok: true };
 
     case 'setRealtimeDate': {
       const value = parseYmd(msg.date) ? msg.date : '';
