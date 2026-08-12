@@ -1,7 +1,7 @@
 {
-    "version":  "1.14.1",
+    "version":  "1.14.2",
     "notes":  [
-                  "Each run in the history now lists the files it fetched, not just when it ran"
+                  "A report is no longer marked done unless its file actually landed in the run folder"
               ],
     "files":  [
                   "background/background.js",

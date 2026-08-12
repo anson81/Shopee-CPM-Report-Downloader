@@ -1125,15 +1125,68 @@ async function runFurious(selected) {
   return done;
 }
 
-/** A page-initiated download is only real once Chrome has finished writing. */
+/**
+ * Did this file actually land in the run folder?
+ *
+ * Used when the download watcher captured nothing. Our onDeterminingFilename
+ * listener is what places a page-started download into the dated folder, so
+ * if it never fired, the file is not where we say it is — but it may still
+ * exist somewhere, and Chrome's own record is the way to find out.
+ */
+async function findRunDownload(expected) {
+  const folder = state.runFolder || state.folder;
+  if (!folder) return null;
+  try {
+    const items = await chrome.downloads.search({
+      limit: 40,
+      orderBy: ['-startTime']
+    });
+    const wanted = basename(expected || '').toLowerCase();
+    const since = (state.startedAt || Date.now()) - 60000;
+    return (
+      items.find((item) => {
+        if (item.state !== 'complete' || item.exists === false) return false;
+        if (new Date(item.startTime).getTime() < since) return false;
+        if (!String(item.filename || '').includes(folder)) return false;
+        return !wanted || basename(item.filename).toLowerCase() === wanted;
+      }) || null
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * A page-initiated download is only real once Chrome has finished writing.
+ *
+ * The no-capture case used to fall through to `return res.filename`, which
+ * reported a tick and a filename for a file nobody had seen land. The 12:14
+ * run on 12 Aug 2026 recorded nine files that way and wrote none of them:
+ * every download had been diverted, and only the one report that saves its
+ * own file — GMV Max — noticed. A missing file has to be louder than that.
+ */
 async function confirmDownload(res) {
-  if (res.via === 'browser' && state.watch.capturedId != null) {
+  if (res.via !== 'browser') return res.filename;
+
+  if (state.watch.capturedId != null) {
     const verified = await verifyDownload(state.watch.capturedId, 120000);
     if (!verified.ok) throw new AppError(verified.error);
     state.lastDownloadId = state.watch.capturedId;
     return verified.filename || res.filename;
   }
-  return res.filename;
+
+  const landed = await findRunDownload(res.filename);
+  if (landed) {
+    state.lastDownloadId = landed.id;
+    return basename(landed.filename) || res.filename;
+  }
+
+  throw new AppError(
+    `Shopee started the download for "${res.filename || 'this report'}" but it ` +
+      `never arrived in ${state.runFolder || state.folder}. Another extension ` +
+      'may be intercepting downloads — check chrome://extensions for a download ' +
+      'manager, then run this report again.'
+  );
 }
 
 /**
