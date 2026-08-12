@@ -71,9 +71,13 @@ file.
 ### What you've already fetched
 
 The popup keeps a list of past runs — when each one happened, which folder it
-saved into, and anything that failed. It answers "did I already run this
-morning, and where did the files go?" without digging through Downloads, which
-matters because every run makes its own dated sub-folder.
+saved into, every file it brought back, and anything that failed. It answers
+"did I already run this morning, what did I get, and where did it go?" without
+digging through Downloads, which matters because every run makes its own dated
+sub-folder.
+
+Click **10 files** under a run to see the reports it fetched and their
+filenames.
 
 The last 40 runs are kept. **Clear this list** empties it; it never touches the
 files themselves.

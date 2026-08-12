@@ -197,13 +197,53 @@ function renderHistory(history) {
       li.appendChild(covers);
     }
 
-    // Only the failures are worth listing — a run where everything worked is
-    // fully described by "10/10" and its folder.
+    // Failures stay in the open — they are the reason to look at this list at
+    // all, and must not be hidden behind another click.
     for (const report of reports.filter((r) => r.status !== 'done')) {
       const detail = document.createElement('div');
       detail.className = 'history-detail error';
       detail.textContent = `#${report.id} ${report.name} — ${report.error || report.status}`;
       li.appendChild(detail);
+    }
+
+    // The files themselves, folded away. Ten of them per run would bury the
+    // list otherwise, but "what did I actually get" is the whole question the
+    // panel exists to answer, so they have to be here.
+    const fetched = reports.filter((r) => r.status === 'done' && r.filename);
+    if (fetched.length) {
+      const box = document.createElement('details');
+      box.className = 'history-files';
+
+      const summary = document.createElement('summary');
+      summary.textContent = `${fetched.length} file${fetched.length === 1 ? '' : 's'}`;
+      box.appendChild(summary);
+
+      for (const report of fetched) {
+        const line = document.createElement('div');
+        line.className = 'history-file';
+        line.appendChild(
+          Object.assign(document.createElement('span'), {
+            className: 'history-file-what',
+            textContent: `#${report.id} ${report.name}`
+          })
+        );
+        line.appendChild(
+          Object.assign(document.createElement('span'), {
+            className: 'history-file-name',
+            textContent: report.filename
+          })
+        );
+        box.appendChild(line);
+      }
+      li.appendChild(box);
+    }
+
+    // A run that produced nothing at all should say so rather than look empty.
+    if (!fetched.length && !reports.some((r) => r.status !== 'done')) {
+      const none = document.createElement('div');
+      none.className = 'history-detail';
+      none.textContent = 'No files.';
+      li.appendChild(none);
     }
 
     el.history.appendChild(li);

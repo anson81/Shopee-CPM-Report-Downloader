@@ -1,7 +1,7 @@
 {
-    "version":  "1.14.0",
+    "version":  "1.14.1",
     "notes":  [
-                  "The popup now keeps a history of past runs - what you have already fetched, where it went, and anything that failed"
+                  "Each run in the history now lists the files it fetched, not just when it ran"
               ],
     "files":  [
                   "background/background.js",

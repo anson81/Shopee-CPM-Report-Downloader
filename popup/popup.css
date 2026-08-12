@@ -378,7 +378,9 @@ footer button:hover:not(:disabled) {
   list-style: none;
   margin: 4px 0 0;
   padding: 0;
-  max-height: 190px;
+  /* Tall enough that opening a run shows most of its ten files without
+     scrolling, while still capping how far the panel can grow. */
+  max-height: 280px;
   overflow-y: auto;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -453,4 +455,38 @@ footer button:hover:not(:disabled) {
 
 .history .link:hover {
   color: var(--shopee);
+}
+
+.history-files {
+  margin-top: 4px;
+}
+
+.history-files summary {
+  padding: 2px 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.history-file {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 1px 0 1px 10px;
+  font-size: 11px;
+}
+
+.history-file-what {
+  flex: none;
+  color: var(--ink);
+}
+
+.history-file-name {
+  min-width: 0;
+  color: var(--muted);
+  text-align: right;
+  overflow-wrap: anywhere;
 }
