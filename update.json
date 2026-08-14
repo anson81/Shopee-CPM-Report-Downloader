@@ -1,7 +1,7 @@
 {
-    "version":  "1.14.3",
+    "version":  "1.14.4",
     "notes":  [
-                  "Looser check on where a downloaded file landed, so a correctly saved report is never called missing"
+                  "Stops reporting a failure for Ads GMV MAX when the file actually arrived. Shopee starts its own download for that report alongside ours, and the check was comparing against Shopee\u0027s copy, so a good run came back 9/10 with the correctly named file already in the folder. It now looks on disk before calling it a failure - and still reports one if the file really is missing."
               ],
     "files":  [
                   "background/background.js",

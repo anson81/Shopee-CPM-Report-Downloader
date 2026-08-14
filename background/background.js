@@ -247,6 +247,18 @@ function basename(p) {
   return String(p || '').split(/[\\/]/).pop();
 }
 
+/**
+ * A literal string, safe to drop into a regex.
+ *
+ * Report names are full of characters a regex reads as syntax — GMV Max's is
+ * "Shop+GMV+MAX-Detail-Data-…", and an unescaped "+" there means "one or more
+ * of the previous character", so the search would never match the file it was
+ * looking for.
+ */
+function escapeRegex(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function fallbackBase(ex) {
   if (ex.kind === 'order') return 'Order.all';
   if (ex.kind === 'bi') return 'parentskudetail';
@@ -722,16 +734,47 @@ async function saveFile(dataUrl, filename) {
   const verified = await verifyDownload(id, 120000);
   if (!verified.ok) return { ok: false, error: verified.error };
 
-  // If Chrome saved it under a different name, something overrode us — say so
-  // rather than reporting a tick against a file that is not where we said.
+  // If Chrome saved it under a different name, something overrode us — but ask
+  // the disk before saying so.
+  //
+  // Ads reports produce TWO downloads: Shopee's page starts its own, which
+  // Chrome names "download.csv", and we save the captured blob under the real
+  // name. When the id verified here is Shopee's rather than ours, the names
+  // differ and this reported a failure against a file that had in fact arrived
+  // correctly — every GMV Max run came back 9/10 with the right file sitting in
+  // the folder. Checked against Chrome's own download record on 14 Aug 2026:
+  // it attributes "Shop+GMV+MAX-Detail-Data-….csv" to this extension, and no
+  // "download.csv" exists anywhere.
+  //
+  // So a name mismatch is only a failure if OUR name never landed. Searching by
+  // name rather than by id also survives the reverse case — our download being
+  // the one that got overridden — because then nothing matches and we still say
+  // so.
   if (verified.filename && verified.filename !== name) {
-    return {
-      ok: false,
-      error:
-        `Chrome saved the file as "${verified.filename}" instead of "${name}". ` +
-        `Another extension may be overriding download filenames — check ` +
-        `chrome://extensions for a download manager.`
-    };
+    let landed = [];
+    try {
+      landed = await chrome.downloads.search({
+        // Anchored to the end: the stored path is absolute, and a bare name
+        // would also match a same-named file in some other folder.
+        filenameRegex: `${escapeRegex(name)}$`,
+        exists: true,
+        limit: 1
+      });
+    } catch (_) {
+      landed = [];
+    }
+
+    if (!landed.length) {
+      return {
+        ok: false,
+        error:
+          `Chrome saved the file as "${verified.filename}" instead of "${name}". ` +
+          `Another extension may be overriding download filenames — check ` +
+          `chrome://extensions for a download manager.`
+      };
+    }
+
+    return { ok: true, filename: name, id: landed[0].id };
   }
 
   state.lastDownloadId = id; // so the popup can reveal the folder afterwards
