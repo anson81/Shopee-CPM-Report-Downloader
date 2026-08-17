@@ -633,14 +633,36 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
   // needed is in memory, so this is decided before the listener returns.
   if (hydrated) {
     const choice = decideDownloadPath(item);
-    if (choice) suggest(choice);
-    else suggest();
+
+    // SAY NOTHING when this is not ours. suggest() with no argument is still an
+    // ANSWER, and Chrome gives the final word to the most recently installed
+    // extension that answers — so abstaining politely here overrode the
+    // SiteGiant twin and dropped ITS files into plain Downloads under Chrome's
+    // own names.
+    //
+    // That is what "download (2).zip" always was: not a stranger's download
+    // manager, but these two extensions taking turns. Each release made one the
+    // newest, and the newest silenced the other. Shopee v1.14.4 shipped 14 Aug
+    // and SiteGiant broke on the 15th; SiteGiant v1.11.0 went on on 17 Aug and
+    // this one broke the same afternoon — every report in the run landing loose
+    // in Downloads, which is the giveaway that the folder was never applied.
+    //
+    // Returning without touching suggest() is a true abstention: Chrome does
+    // not count this extension for that download at all.
+    if (!choice) return;
+
+    suggest(choice);
     return;
   }
 
   // The only remaining case: a worker woken by this very event with nothing in
   // memory yet. Answering late is a gamble on Chrome still listening, but
   // declining outright loses the file for certain.
+  // Returning true commits us to calling suggest(), so this branch cannot
+  // abstain the clean way. It is the narrow case of a worker woken by this very
+  // event, which the keep-alive makes rare during a run — and a bare suggest()
+  // costs the twin only for that one download, against losing our own name for
+  // certain if we said nothing and Chrome moved on without us.
   hydrating
     .then(() => {
       const choice = decideDownloadPath(item);

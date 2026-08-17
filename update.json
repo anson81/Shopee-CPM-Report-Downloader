@@ -1,7 +1,7 @@
 {
-    "version":  "1.14.4",
+    "version":  "1.14.5",
     "notes":  [
-                  "Stops reporting a failure for Ads GMV MAX when the file actually arrived. Shopee starts its own download for that report alongside ours, and the check was comparing against Shopee\u0027s copy, so a good run came back 9/10 with the correctly named file already in the folder. It now looks on disk before calling it a failure - and still reports one if the file really is missing."
+                  "Stops this extension silencing the SiteGiant one, and fixes its own reports landing loose in Downloads. Both extensions were answering Chrome about every download in the browser; Chrome gives the final say to whichever was installed most recently, so each new release broke the other twin. Each now says nothing about downloads that are not its own."
               ],
     "files":  [
                   "background/background.js",
