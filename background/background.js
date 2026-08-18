@@ -615,6 +615,31 @@ function decideDownloadPath(item) {
 }
 
 chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+  // NEVER ANSWER FOR ANOTHER EXTENSION'S DOWNLOAD.
+  //
+  // Chrome asks every extension holding the downloads permission about every
+  // download in the browser. It does not scope the question by site, so "we
+  // only deal with Shopee" is not something Chrome knows or enforces — it is
+  // something this listener has to enforce for itself.
+  //
+  // v1.14.5 tried to, through decideDownloadPath(), and covered only the warm
+  // worker. Two holes were left, and tools/test-filename-listener.js
+  // reproduces both:
+  //
+  //   - Cold worker: the branch at the bottom returns true and then answers
+  //     after hydration, and a blank answer is still an answer. This is not
+  //     the rare case it was assumed to be — this worker is asleep exactly
+  //     while the twin is running, so it was the everyday case.
+  //   - Mid-run: decideDownloadPath() treats any data: URL as our own save and
+  //     handed the twin's zip OUR path and OUR filename.
+  //
+  // byExtensionId comes with the event itself, so this needs no stored state
+  // and is right on a worker woken by this very download. Our own saves carry
+  // our id; downloads started by Shopee's page carry no id at all — both fall
+  // through. Returning without touching suggest() is a true abstention: Chrome
+  // does not count this extension for that download.
+  if (item.byExtensionId && item.byExtensionId !== chrome.runtime.id) return;
+
   // ANSWER SYNCHRONOUSLY WHENEVER POSSIBLE.
   //
   // v1.9.0 made this listener unconditionally async — await hydration, then

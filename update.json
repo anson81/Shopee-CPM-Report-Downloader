@@ -1,7 +1,7 @@
 {
-    "version":  "1.14.5",
+    "version":  "1.14.6",
     "notes":  [
-                  "Stops this extension silencing the SiteGiant one, and fixes its own reports landing loose in Downloads. Both extensions were answering Chrome about every download in the browser; Chrome gives the final say to whichever was installed most recently, so each new release broke the other twin. Each now says nothing about downloads that are not its own."
+                  "Stops this extension wiping the SiteGiant twin\u0027s filenames. Chrome asks every extension about every download in the browser, and this one still answered about the twin\u0027s files when its own background worker had gone to sleep - which is exactly when the twin runs. A blank answer is not silence: it tells Chrome to use the name it guessed from the link, which is why those files arrived as download.zip. It now checks who started the download before saying anything."
               ],
     "files":  [
                   "background/background.js",
