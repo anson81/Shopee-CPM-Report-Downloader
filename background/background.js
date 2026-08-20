@@ -699,7 +699,13 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
 });
 
 // Backstop: if another extension wins onDeterminingFilename, we still notice
-// that a Shopee download happened and skip the blob fallback.
+// that a Shopee download happened.
+//
+// Note what this does NOT say. Capturing a download means "one started and we
+// know its id" — never "it went where we asked". Reading it as the latter is
+// what let a whole run tick green with every file loose in Downloads, so
+// confirmDownload() checks the path Chrome actually used and fetches our own
+// copy when it is the wrong one.
 chrome.downloads.onCreated.addListener(async (item) => {
   try {
     await hydrating;
@@ -728,7 +734,9 @@ async function verifyDownload(id, timeoutMs) {
     const item = items[0];
     if (item) {
       if (item.state === 'complete') {
-        return { ok: true, filename: basename(item.filename) };
+        // The full path, not just the name: where a file landed is the whole
+        // question, and the name alone cannot answer it.
+        return { ok: true, filename: basename(item.filename), path: item.filename };
       }
       if (item.state === 'interrupted') {
         return {
@@ -821,7 +829,17 @@ async function saveFile(dataUrl, filename) {
       };
     }
 
+    if (misplaced(landed[0].filename)) {
+      return { ok: false, error: strayMessage(name, landed[0].filename) };
+    }
+
     return { ok: true, filename: name, id: landed[0].id };
+  }
+
+  // The name we asked for is the name on disk — but a name says nothing about
+  // a folder, and the folder is the part another extension takes away.
+  if (misplaced(verified.path)) {
+    return { ok: false, error: strayMessage(name, verified.path) };
   }
 
   state.lastDownloadId = id; // so the popup can reveal the folder afterwards
@@ -1193,14 +1211,24 @@ async function runFurious(selected) {
       if (res.cancelled) throw new AppError(ERR.CANCELLED);
       if (!res.ok) throw new AppError(res.error || 'Download failed.');
 
-      const name = await confirmDownload(res);
+      const { name, strayPath } = await confirmDownload(res, {
+        tabId: slot.tabId,
+        params
+      });
       assertNotStale(slot.ex, name);
       if (slot.ex.kind === 'order') {
         logOrder(
-          `#${slot.ex.id} collect: saved as ${name} after ${res.looks || '?'} look(s)`
+          `#${slot.ex.id} collect: saved as ${name} after ${res.looks || '?'} look(s)` +
+            (strayPath ? ` (Chrome had put it in ${strayPath}; fetched again)` : '')
         );
       }
-      setResult(slot.ex.id, { status: 'done', filename: name, detail: name });
+      setResult(slot.ex.id, {
+        status: 'done',
+        filename: name,
+        // Named, not hidden: the seller is about to find a second copy of this
+        // file loose in Downloads, and a silent tick makes that look like a bug.
+        detail: strayPath ? `${name} — a stray copy was left in Downloads` : name
+      });
       done++;
       await closeTabs([slot.tabId]);
     } catch (e) {
@@ -1213,6 +1241,40 @@ async function runFurious(selected) {
     }
   }
   return done;
+}
+
+/**
+ * Is this path inside the run folder?
+ *
+ * The folder we ask for is only ever a SUGGESTION. Chrome asks every extension
+ * holding the downloads permission where a file should go and gives the last
+ * word to the most recently installed one that answers, so "the download
+ * finished" has never meant "the download finished where we put it".
+ *
+ * Nothing checked. The onCreated backstop below marks a download captured the
+ * moment a Shopee download starts — whether or not our folder was applied —
+ * and confirmDownload() took that as proof and ticked the report. The 20 Aug
+ * run reported 9/10 with every file sitting loose in Downloads under Shopee's
+ * own names, which is precisely what that looks like from the outside.
+ *
+ * Compared segment by segment: a folder name must be a folder on the path, not
+ * a substring of some longer name that happens to contain it.
+ */
+function landedInRunFolder(path) {
+  const folder = state.runFolder || state.folder;
+  if (!folder || !path) return false;
+  return String(path).split(/[\\/]/).includes(folder);
+}
+
+/**
+ * Did this file end up somewhere we did not ask for?
+ *
+ * Distinct from `!landedInRunFolder()`, which is also false when there is no
+ * run folder to compare against. With no folder in mind nothing can be
+ * misplaced, and a save outside a run must not be failed for it.
+ */
+function misplaced(path) {
+  return Boolean(state.folder) && !landedInRunFolder(path);
 }
 
 /**
@@ -1242,7 +1304,7 @@ async function findRunDownload(expected) {
     const inFolder = items.filter((item) => {
       if (item.state !== 'complete' || item.exists === false) return false;
       if (new Date(item.startTime).getTime() < since) return false;
-      return String(item.filename || '').includes(folder);
+      return landedInRunFolder(item.filename);
     });
 
     // Prefer the file we were expecting; otherwise take the newest thing this
@@ -1258,36 +1320,103 @@ async function findRunDownload(expected) {
 }
 
 /**
- * A page-initiated download is only real once Chrome has finished writing.
+ * What to say when a file exists but not where it belongs.
+ *
+ * Names the path Chrome actually used, because the file IS there and the seller
+ * can go and get it — "the download failed" would be both wrong and unhelpful.
+ */
+function strayMessage(name, path, extra) {
+  return (
+    `Chrome saved "${name}" to ${path || 'your Downloads folder'} instead of ` +
+    `${targetDir()}.${extra ? ` ${extra}` : ''} Another extension is overriding ` +
+    'where downloads go — check chrome://extensions for a download manager, ' +
+    'then run this report again.'
+  );
+}
+
+/**
+ * Fetch our own copy of a file that landed outside the run folder.
+ *
+ * Losing the placement is not the same as losing the file. Shopee's response is
+ * still in the content script's captures, so it can be saved a second time
+ * through downloads.download() with the path attached — the way the SiteGiant
+ * twin has always worked, and the way that does not depend on winning Chrome's
+ * arbitration. The stray copy is left where Chrome put it: it is a file the
+ * seller can see, and deleting downloads is not this extension's business.
+ */
+async function rescueStray(verified, ctx) {
+  if (!ctx || ctx.tabId == null) {
+    throw new AppError(
+      strayMessage(
+        verified.filename,
+        verified.path,
+        'The tab it came from is gone, so no second copy could be fetched.'
+      )
+    );
+  }
+
+  let rescued = null;
+  try {
+    rescued = await sendToContent(ctx.tabId, {
+      type: 'rescueExport',
+      // The stray carries Shopee's own name, which beats anything we could
+      // reconstruct — so hand it back as the name to save under.
+      params: { ...(ctx.params || {}), preferredName: verified.filename }
+    });
+  } catch (_) {
+    rescued = null;
+  }
+
+  if (!rescued || !rescued.ok || !rescued.filename) {
+    throw new AppError(
+      strayMessage(
+        verified.filename,
+        verified.path,
+        'The file could not be fetched a second time to put a copy there.'
+      )
+    );
+  }
+
+  return { name: rescued.filename, strayPath: verified.path };
+}
+
+/**
+ * A page-initiated download is only real once Chrome has finished writing it —
+ * and only ours once it is in the run folder.
  *
  * The no-capture case used to fall through to `return res.filename` — the name
  * the content script EXPECTED — so a report could be ticked for a file nobody
- * had seen arrive. Our onDeterminingFilename listener is what puts a
- * page-started download into the dated folder and what records the capture, so
- * no capture means no controlled placement, and that deserves a look rather
- * than a tick.
+ * had seen arrive. The capture case was no better: onCreated marks a download
+ * captured whether or not our folder was applied, so a whole run could tick
+ * green with every file loose in Downloads. Both now have to show the file in
+ * the folder.
  */
-async function confirmDownload(res) {
-  if (res.via !== 'browser') return res.filename;
+async function confirmDownload(res, ctx) {
+  if (res.via !== 'browser') return { name: res.filename };
 
   if (state.watch.capturedId != null) {
     const verified = await verifyDownload(state.watch.capturedId, 120000);
     if (!verified.ok) throw new AppError(verified.error);
-    state.lastDownloadId = state.watch.capturedId;
-    return verified.filename || res.filename;
+
+    if (!misplaced(verified.path)) {
+      state.lastDownloadId = state.watch.capturedId;
+      return { name: verified.filename || res.filename };
+    }
+
+    return rescueStray(verified, ctx);
   }
 
   const landed = await findRunDownload(res.filename);
   if (landed) {
     state.lastDownloadId = landed.id;
-    return basename(landed.filename) || res.filename;
+    return { name: basename(landed.filename) || res.filename };
   }
 
   throw new AppError(
     `Shopee started the download for "${res.filename || 'this report'}" but it ` +
-      `never arrived in ${state.runFolder || state.folder}. Another extension ` +
-      'may be intercepting downloads — check chrome://extensions for a download ' +
-      'manager, then run this report again.'
+      `never arrived in ${targetDir()}. Another extension may be intercepting ` +
+      'downloads — check chrome://extensions for a download manager, then run ' +
+      'this report again.'
   );
 }
 

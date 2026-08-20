@@ -918,6 +918,60 @@
   }
 
   /**
+   * Save whatever the interceptor already caught, without asking the page again.
+   *
+   * Every route here writes the file through downloads.download() with the full
+   * path attached, which is the only placement Chrome does not put to a vote
+   * among the installed extensions. Returns null when nothing has arrived yet.
+   */
+  async function saveFromCaptures(o) {
+    const api = captures.apis
+      .filter((a) => a.json && a.json.data && a.json.data.download_url)
+      .pop();
+    if (api) {
+      return {
+        filename: await saveFromUrl(
+          api.json.data.download_url,
+          o.fallbackBase,
+          o.preferredName
+        ),
+        via: 'api'
+      };
+    }
+
+    const blob = captures.blobs[captures.blobs.length - 1];
+    if (blob && blob.dataUrl) {
+      const name = blobFilename(blob, o.fallbackBase) || o.preferredName;
+      return { filename: await saveDataUrl(blob.dataUrl, name), via: 'blob' };
+    }
+
+    const link = captures.links[captures.links.length - 1];
+    if (link && link.url) {
+      return {
+        filename: await saveFromUrl(link.url, o.fallbackBase, o.preferredName),
+        via: 'link'
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Write our own copy of a report Chrome filed somewhere else.
+   *
+   * Called by the background when a browser download completed outside the run
+   * folder. Nothing is triggered again — the captures from the collect that has
+   * just run are still here, and re-clicking would ask Shopee for a second
+   * export it may well refuse.
+   */
+  async function rescueExport(o) {
+    report('Chrome filed that elsewhere — saving our own copy…');
+    const saved = await saveFromCaptures(o);
+    if (!saved) throw new AppError(ERR.NO_BLOB);
+    return { ok: true, filename: saved.filename, via: saved.via };
+  }
+
+  /**
    * Trigger a download and capture the file, whichever way Shopee delivers it.
    *
    *   1. Shopee's own browser download  -> the background rewrites its path
@@ -945,33 +999,8 @@
         return { filename: watch.filename, via: 'browser' };
       }
 
-      const api = captures.apis
-        .filter((a) => a.json && a.json.data && a.json.data.download_url)
-        .pop();
-      if (api) {
-        return {
-          filename: await saveFromUrl(
-            api.json.data.download_url,
-            o.fallbackBase,
-            o.preferredName
-          ),
-          via: 'api'
-        };
-      }
-
-      const blob = captures.blobs[captures.blobs.length - 1];
-      if (blob && blob.dataUrl) {
-        const name = blobFilename(blob, o.fallbackBase) || o.preferredName;
-        return { filename: await saveDataUrl(blob.dataUrl, name), via: 'blob' };
-      }
-
-      const link = captures.links[captures.links.length - 1];
-      if (link && link.url) {
-        return {
-          filename: await saveFromUrl(link.url, o.fallbackBase, o.preferredName),
-          via: 'link'
-        };
-      }
+      const saved = await saveFromCaptures(o);
+      if (saved) return saved;
 
       if (i < extraRounds) {
         report(`Waiting for the file… ${(i + 1) * 2}s`);
@@ -1852,6 +1881,18 @@
         startHeartbeat();
         try {
           return { ok: true, ...(await checkLogin()) };
+        } finally {
+          stopHeartbeat();
+        }
+      }
+
+      // The browser download landed outside the run folder. Save our own copy
+      // from what was already captured, without asking Shopee for a new export.
+      case 'rescueExport': {
+        cancelled = false;
+        startHeartbeat();
+        try {
+          return await rescueExport(msg.params || {});
         } finally {
           stopHeartbeat();
         }

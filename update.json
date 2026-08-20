@@ -1,7 +1,8 @@
 {
-    "version":  "1.14.6",
+    "version":  "1.15.0",
     "notes":  [
-                  "Stops this extension wiping the SiteGiant twin\u0027s filenames. Chrome asks every extension about every download in the browser, and this one still answered about the twin\u0027s files when its own background worker had gone to sleep - which is exactly when the twin runs. A blank answer is not silence: it tells Chrome to use the name it guessed from the link, which is why those files arrived as download.zip. It now checks who started the download before saying anything."
+                  "Reports now really do land in the dated folder. Chrome asks every extension where a download should go and gives the last word to the most recently installed one, so this extension\u0027s folder was only ever a request - and when something else overruled it, the files landed loose in Downloads while the run still reported success. It now checks where each file actually went, and fetches its own copy into the folder when Chrome put it somewhere else.",
+                  "A report is no longer ticked green for a file that is not in the run folder. That is what the 9/10 runs with everything loose in Downloads were: a download that finished was being read as a download that landed."
               ],
     "files":  [
                   "background/background.js",

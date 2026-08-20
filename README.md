@@ -134,6 +134,23 @@ You can also press **Check** in the popup at any time.
 | A report shows a red error | Run just that number again. Shopee's page is sometimes slow |
 | Nothing downloads | Make sure the Chrome window stayed open and visible during the run |
 | The extension disappeared | The folder was moved or deleted. Unzip it again and re-add it |
+| "Chrome saved … instead of Shopee daily report/…" | Another extension is deciding where downloads go. See below |
+
+### Files landing loose in Downloads
+
+Chrome asks **every** extension that can see downloads where a file should go,
+and the last word goes to whichever one was installed most recently. So the
+folder this extension asks for is a request, not a decision — a download
+manager, a "save to folder" helper, even a screen recorder can overrule it, and
+the reports then land in plain Downloads with Shopee's names on them.
+
+When that happens the extension notices and fetches its own copy into the run
+folder, so you still get the folder. It also says so on the report line — *"a
+stray copy was left in Downloads"* — because you will find a second copy of
+that file sitting there, and a silent tick would make that look like a fault.
+
+To stop it happening at all, open `chrome://extensions` and turn off anything
+that manages downloads.
 
 Each person gets **their own shop's** reports, from whichever Shopee account
 they are logged into. Nothing is shared, and no data is sent anywhere except
