@@ -1,0 +1,6 @@
+# Windows checks these out as CRLF, which then reads as an edit to every file on
+# every `git status`. Normalise to LF in the repo so a real change is visible.
+# The other two extension repos already do this; without it, whether the CI
+# script arrives with stray carriage returns depends on the PC that pushed it.
+* text=auto eol=lf
+*.png binary
