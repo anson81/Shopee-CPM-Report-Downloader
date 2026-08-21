@@ -1,8 +1,8 @@
 {
-    "version":  "1.16.2",
+    "version":  "1.17.0",
     "notes":  [
-                  "Three things the report was getting wrong, found the first time it was used for real. It said the update check had never run, when it had - the time was stored under a name it was not reading. It said no reports folder was chosen, when this extension has never had that option at all. And where a report already described itself, the numbers were printed twice.",
-                  "None of these were guesses. A report that is confidently wrong is worse than no report, because it sends whoever is reading it somewhere else."
+                  "The error message no longer blames another extension. Chrome\u0027s own download history for the failed runs on 21 August shows no other extension touched those files - this one simply did not answer when Chrome asked where to put them. Saying otherwise sent the search in the wrong direction.",
+                  "Copy diagnostics now records WHY each file was or was not placed, one line per download. The report could previously say a file went astray but not which of several reasons caused it, so it guessed. Run the reports once more and copy the diagnostics - that will name the cause."
               ],
     "files":  [
                   "background/background.js",

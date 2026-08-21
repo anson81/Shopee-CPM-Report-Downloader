@@ -574,9 +574,17 @@ const GENERIC_DOWNLOAD_RE =
  * leave the file alone. Pure and synchronous — it only reads state that is
  * already in memory.
  */
+// Set by decideDownloadPath at every exit, read by the listener right after.
+let lastDecisionReason = '';
+
 function decideDownloadPath(item) {
+  lastDecisionReason = 'abstained: no reason recorded';
   try {
-    if (!state.running || !state.folder) return null; // leave unrelated downloads alone
+    // Each of these is a different problem wearing the same face, so each
+    // says which one it is. `lastDecisionReason` is read by the listener
+    // immediately after this returns - synchronous, single-threaded.
+    if (!state.running) { lastDecisionReason = 'abstained: no run in progress'; return null; }
+    if (!state.folder) { lastDecisionReason = 'abstained: state.folder is empty'; return null; }
     const url = item.url || '';
 
     // Our own saveFile download. The `filename` passed to downloads.download()
@@ -584,9 +592,12 @@ function decideDownloadPath(item) {
     // can override, and something on this machine was overriding it, dropping
     // the file into plain Downloads. Re-assert the path here.
     if (url.startsWith('data:')) {
-      return state.pendingSavePath
-        ? { filename: state.pendingSavePath, conflictAction: 'overwrite' }
-        : null;
+      if (!state.pendingSavePath) {
+        lastDecisionReason = 'abstained: our own data: save, but pendingSavePath is empty';
+        return null;
+      }
+      lastDecisionReason = 'placed our own save at ' + state.pendingSavePath;
+      return { filename: state.pendingSavePath, conflictAction: 'overwrite' };
     }
 
     const haystack = [item.url, item.finalUrl, item.referrer]
@@ -600,6 +611,9 @@ function decideDownloadPath(item) {
     // placeholder name while we are mid-collect — never for a download that
     // already has a real name of its own.
     if (!SHOPEE_HOST_RE.test(haystack) && !(placeholder && state.expectedName)) {
+      lastDecisionReason = 'abstained: no shopee host in url/finalUrl/referrer' +
+        (placeholder ? ' (name is a placeholder but expectedName is empty)' : '') +
+        ' | saw: ' + haystack.slice(0, 120);
       return null;
     }
 
@@ -610,11 +624,13 @@ function decideDownloadPath(item) {
     state.watch.capturedId = item.id;
     state.watch.capturedName = name;
     persistRun();
+    lastDecisionReason = 'placed at ' + targetDir() + '/' + name;
     return {
       filename: `${targetDir()}/${name}`,
       conflictAction: 'overwrite'
     };
-  } catch (_) {
+  } catch (err) {
+    lastDecisionReason = 'abstained: threw - ' + ((err && err.message) || String(err));
     return null; // fall through to Chrome's default filename
   }
 }
@@ -637,6 +653,40 @@ function decideDownloadPath(item) {
  * returns, which is the mistake this file has already made twice.
  * ------------------------------------------------------------------ */
 const otherDownloaders = new Map();
+
+/**
+ * Why the filename listener did what it did, for the last few downloads.
+ *
+ * WHY THIS EXISTS.
+ *
+ * On 21 Aug 2026 every report in two consecutive runs landed loose in
+ * Downloads. Chrome's own download history settled who was to blame: the
+ * page-started files were named by NOBODY - no extension answered at all - and
+ * the retry this extension starts itself came out as "download (9).xlsx". So
+ * nothing was overriding us. We were declining to answer, and the message
+ * shipped to the user blamed a download manager that had not touched it.
+ *
+ * The sightings list could not show that: it records downloads STARTED BY
+ * another extension, and Chrome never says who else answered. What was missing
+ * was our own reasoning - decideDownloadPath() has five separate ways to
+ * return null and the report could not tell them apart.
+ *
+ * Recorded synchronously, in memory, capped. Same rules as the sightings: this
+ * listener must not do work before it returns.
+ */
+const DECISION_LIMIT = 24;
+const filenameDecisions = [];
+
+function noteDecision(item, reason) {
+  filenameDecisions.unshift({
+    at: Date.now(),
+    name: (item && item.filename) || '',
+    url: String((item && item.url) || '').slice(0, 80),
+    byExt: (item && item.byExtensionId) || '',
+    reason: reason
+  });
+  if (filenameDecisions.length > DECISION_LIMIT) filenameDecisions.length = DECISION_LIMIT;
+}
 
 function noteOtherDownloader(id, at) {
   if (!id) return;
@@ -675,7 +725,10 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
     // without answering AND without abstaining cleanly, which is the exact
     // failure mode the guard above exists to prevent. A dropped sighting costs
     // a line in a diagnostics report; a thrown listener costs the file.
-    try { noteOtherDownloader(item.byExtensionId, Date.now()); } catch (_) { /* never worth a download */ }
+    try {
+      noteOtherDownloader(item.byExtensionId, Date.now());
+      noteDecision(item, 'abstained: started by another extension');
+    } catch (_) { /* never worth a download */ }
     return;
   }
 
@@ -697,6 +750,7 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
   // needed is in memory, so this is decided before the listener returns.
   if (hydrated) {
     const choice = decideDownloadPath(item);
+    try { noteDecision(item, lastDecisionReason); } catch (_) { /* never worth a download */ }
 
     // SAY NOTHING when this is not ours. suggest() with no argument is still an
     // ANSWER, and Chrome gives the final word to the most recently installed
@@ -727,6 +781,12 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
   // event, which the keep-alive makes rare during a run — and a bare suggest()
   // costs the twin only for that one download, against losing our own name for
   // certain if we said nothing and Chrome moved on without us.
+  // The cold-worker gamble. If this is what has been happening, it explains
+  // everything at once: Chrome settles on a name before the answer arrives, so
+  // the file is named by nobody and lands loose - which is exactly what its
+  // download history shows.
+  try { noteDecision(item, 'COLD WORKER: answering late, Chrome may already have decided'); } catch (_) {}
+
   hydrating
     .then(() => {
       const choice = decideDownloadPath(item);
@@ -863,8 +923,11 @@ async function saveFile(dataUrl, filename) {
         ok: false,
         error:
           `Chrome saved the file as "${verified.filename}" instead of "${name}". ` +
-          `Another extension may be overriding download filenames — check ` +
-          `chrome://extensions for a download manager.`
+          // Do NOT name a culprit here. On 21 Aug 2026 this message blamed a
+          // download manager while Chrome's own history showed no other
+          // extension had touched the file - this extension had simply
+          // declined to answer. A confident wrong cause is worse than none.
+          `Something stopped the file being placed. Open this extension's Options page and click Copy diagnostics - it now records why the file was not placed, which is the only way to tell.`
       };
     }
 
@@ -1367,8 +1430,8 @@ async function findRunDownload(expected) {
 function strayMessage(name, path, extra) {
   return (
     `Chrome saved "${name}" to ${path || 'your Downloads folder'} instead of ` +
-    `${targetDir()}.${extra ? ` ${extra}` : ''} Another extension is overriding ` +
-    'where downloads go — check chrome://extensions for a download manager, ' +
+    `${targetDir()}.${extra ? ` ${extra}` : ''} ` +
+    'Open the Options page and click Copy diagnostics - it now records why the file was not placed, which is the only way to tell. ' +
     'then run this report again.'
   );
 }
@@ -1453,8 +1516,8 @@ async function confirmDownload(res, ctx) {
 
   throw new AppError(
     `Shopee started the download for "${res.filename || 'this report'}" but it ` +
-      `never arrived in ${targetDir()}. Another extension may be intercepting ` +
-      'downloads — check chrome://extensions for a download manager, then run ' +
+      `never arrived in ${targetDir()}. ` +
+      'Open the Options page and click Copy diagnostics - it now records why the file was not placed, which is the only way to tell. Then run ' +
       'this report again.'
   );
 }
@@ -1792,6 +1855,7 @@ async function handle(msg, sender) {
           updateInfo: stored.updateCache || null,
           otherExtensions: Array.from(otherDownloaders.values())
             .sort((a, b) => b.lastAt - a.lastAt),
+          decisions: filenameDecisions,
           history: stored.history || [],
           historyLimit: 5
         })
