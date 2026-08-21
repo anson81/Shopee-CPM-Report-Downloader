@@ -44,12 +44,19 @@ Write-Host "manifest.json: $old -> $Version"
 # docs and tools live in the repo but are not part of the installed extension —
 # the updater fetches every file listed here, so shipping them would make each
 # update download design notes for no reason.
+# Kept in step with SKIP_DIRS/SKIP_FILES in tools/test-release-consistency.js
+# and the exclude list in .github/workflows/tests.yml. Those three disagreeing
+# is how a genuinely shipped file ends up exempt from every check there is.
 $skip = @('tools', 'docs', '.git', '.github', 'node_modules')
+# Developer notes, not runtime code. Shipping CLAUDE.md would write it onto
+# every machine on every update, for nothing.
+$skipFiles = @('CLAUDE.md')
 $files = Get-ChildItem -Path $root -Recurse -File |
     Where-Object {
         $rel = $_.FullName.Substring($root.Length + 1).Replace('\', '/')
         $top = $rel.Split('/')[0]
-        ($skip -notcontains $top)
+        # A leading dot means repo scaffolding: .gitattributes, .gitignore.
+        ($skip -notcontains $top) -and ($skipFiles -notcontains $rel) -and (-not $top.StartsWith('.'))
     } |
     ForEach-Object { $_.FullName.Substring($root.Length + 1).Replace('\', '/') } |
     Sort-Object

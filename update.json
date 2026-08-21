@@ -1,8 +1,8 @@
 {
-    "version":  "1.15.0",
+    "version":  "1.16.0",
     "notes":  [
-                  "Reports now really do land in the dated folder. Chrome asks every extension where a download should go and gives the last word to the most recently installed one, so this extension\u0027s folder was only ever a request - and when something else overruled it, the files landed loose in Downloads while the run still reported success. It now checks where each file actually went, and fetches its own copy into the folder when Chrome put it somewhere else.",
-                  "A report is no longer ticked green for a file that is not in the run folder. That is what the 9/10 runs with everything loose in Downloads were: a download that finished was being read as a download that landed."
+                  "A Copy diagnostics button, on the Options page. When something goes wrong on a computer nobody can look at, one click puts the details on the clipboard - version, browser, the last few runs with every error, and which other extensions have been handling downloads. Paste it to whoever is fixing it. Nothing is sent anywhere by itself, and the page shows you every word before you copy it.",
+                  "Your Windows or Mac username is removed from the folder paths, so the report can be forwarded without a second thought. The folders themselves are kept, because that is usually where the answer is."
               ],
     "files":  [
                   "background/background.js",
@@ -11,6 +11,7 @@
                   "icons/icon128.png",
                   "icons/icon16.png",
                   "icons/icon48.png",
+                  "lib/diagnostics.js",
                   "manifest.json",
                   "options/options.css",
                   "options/options.html",

@@ -25,7 +25,10 @@ const el = {
   repo: document.getElementById('repo'),
   branch: document.getElementById('branch'),
   saveSource: document.getElementById('save-source'),
-  sourceSaved: document.getElementById('source-saved')
+  sourceSaved: document.getElementById('source-saved'),
+  copyDiagnostics: document.getElementById('copy-diagnostics'),
+  diagnosticsCopied: document.getElementById('diagnostics-copied'),
+  diagnostics: document.getElementById('diagnostics')
 };
 
 let latest = null; // last successful check result
@@ -99,6 +102,53 @@ async function send(msg) {
   } catch (e) {
     return { ok: false, error: (e && e.message) || String(e) };
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * Diagnostics
+ *
+ * The worker holds the facts; this page holds the clipboard. Splitting it that
+ * way keeps the formatting in lib/diagnostics.js, where a node test can read it
+ * without a browser.
+ *
+ * The text is shown as well as copied, deliberately. It contains folder paths
+ * and report names, and someone about to paste that into a chat is entitled to
+ * see it first. It is also the fallback: if the clipboard write is refused -
+ * which happens when the page has lost focus - the text is still on screen and
+ * still selectable.
+ * ------------------------------------------------------------------ */
+async function copyDiagnostics() {
+  el.copyDiagnostics.disabled = true;
+  el.diagnosticsCopied.hidden = true;
+
+  const res = await send({
+    type: 'getDiagnostics',
+    extensionFolderGranted: !!folderHandle
+  });
+
+  if (!res || !res.ok || !res.report) {
+    el.diagnostics.hidden = false;
+    el.diagnostics.textContent =
+      'Could not gather diagnostics: ' + ((res && res.error) || 'no answer from the extension') +
+      '\n\nThat is itself worth reporting.';
+    el.copyDiagnostics.disabled = false;
+    return;
+  }
+
+  el.diagnostics.hidden = false;
+  el.diagnostics.textContent = res.report;
+
+  try {
+    await navigator.clipboard.writeText(res.report);
+    el.diagnosticsCopied.hidden = false;
+    el.diagnosticsCopied.textContent = 'Copied \u2014 paste it into your chat';
+  } catch (e) {
+    // Not a failure worth hiding: the text is on screen, so say what to do.
+    el.diagnosticsCopied.hidden = false;
+    el.diagnosticsCopied.textContent = 'Could not reach the clipboard \u2014 select the text below and copy it';
+  }
+
+  el.copyDiagnostics.disabled = false;
 }
 
 /* ------------------------------------------------------------------ *
@@ -281,6 +331,7 @@ async function checkForUpdate(force) {
 }
 
 el.check.addEventListener('click', () => checkForUpdate(true));
+el.copyDiagnostics.addEventListener('click', copyDiagnostics);
 
 /* ------------------------------------------------------------------ *
  * Installing

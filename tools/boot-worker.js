@@ -123,6 +123,21 @@ function bootWorker({ session = {}, sessionDelayMs = 0, downloads = {}, tabs = {
     structuredClone: (v) => JSON.parse(JSON.stringify(v)),
     addEventListener() {},
     removeEventListener() {},
+
+    // The real thing, not a no-op.
+    //
+    // background.js pulls lib/diagnostics.js in this way, and a stub that did
+    // nothing would leave the global it defines undefined - so the worker
+    // would boot here and throw in Chrome, which is the wrong way round for a
+    // harness whose whole purpose is to run the file that actually ships.
+    // Evaluating the script in this same context is exactly what a service
+    // worker does with it.
+    importScripts(...paths) {
+      for (const rel of paths) {
+        const file = path.resolve(path.dirname(SOURCE), rel);
+        vm.runInContext(fs.readFileSync(file, 'utf8'), sandbox, { filename: file });
+      }
+    },
   };
   sandbox.globalThis = sandbox;
   sandbox.self = sandbox;

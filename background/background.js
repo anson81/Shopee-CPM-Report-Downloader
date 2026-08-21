@@ -10,6 +10,11 @@
  */
 'use strict';
 
+// lib/diagnostics.js builds the report the Options page copies. It is a plain
+// script attaching to self, not a module, because this worker is not one.
+importScripts('../lib/diagnostics.js');
+const Diagnostics = self.SRD_Diagnostics;
+
 const BI_URL = 'https://seller.shopee.com.my/datacenter/product/overview';
 const ADS_URL = 'https://seller.shopee.com.my/portal/marketing/pas/index';
 const ORDER_URL = 'https://seller.shopee.com.my/portal/sale/order';
@@ -614,6 +619,33 @@ function decideDownloadPath(item) {
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * Who else is answering Chrome about downloads.
+ *
+ * Chrome asks every extension holding the downloads permission about every
+ * download in the browser, and hands us the asking extension's id. We abstain
+ * on those - see the listener below - but the id is worth keeping, because it
+ * is the single fact that would have ended the August 2026 filename hunt in
+ * minutes instead of a fortnight. It costs nothing and needs no permission;
+ * "management" would have to be declared to ask Chrome the same question, and
+ * that changes the install warning to say we read the list of installed
+ * extensions.
+ *
+ * In memory only, and deliberately not persisted. A sighting matters while the
+ * worker that saw it is alive - which is exactly the run being diagnosed - and
+ * writing to storage from this listener would mean doing work before it
+ * returns, which is the mistake this file has already made twice.
+ * ------------------------------------------------------------------ */
+const otherDownloaders = new Map();
+
+function noteOtherDownloader(id, at) {
+  if (!id) return;
+  const seen = otherDownloaders.get(id) || { id, count: 0, lastAt: 0 };
+  seen.count += 1;
+  seen.lastAt = at;
+  otherDownloaders.set(id, seen);
+}
+
 chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
   // NEVER ANSWER FOR ANOTHER EXTENSION'S DOWNLOAD.
   //
@@ -638,7 +670,14 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
   // our id; downloads started by Shopee's page carry no id at all — both fall
   // through. Returning without touching suggest() is a true abstention: Chrome
   // does not count this extension for that download.
-  if (item.byExtensionId && item.byExtensionId !== chrome.runtime.id) return;
+  if (item.byExtensionId && item.byExtensionId !== chrome.runtime.id) {
+    // Wrapped, and nothing else. If this ever threw, the listener would leave
+    // without answering AND without abstaining cleanly, which is the exact
+    // failure mode the guard above exists to prevent. A dropped sighting costs
+    // a line in a diagnostics report; a thrown listener costs the file.
+    try { noteOtherDownloader(item.byExtensionId, Date.now()); } catch (_) { /* never worth a download */ }
+    return;
+  }
 
   // ANSWER SYNCHRONOUSLY WHENEVER POSSIBLE.
   //
@@ -1726,6 +1765,34 @@ async function handle(msg, sender) {
     case 'getHistory': {
       const { history = [] } = await chrome.storage.local.get('history');
       return { ok: true, history };
+    }
+
+    // Everything the Options page needs for "Copy diagnostics", gathered here
+    // because the worker is the only side that can see the run history and the
+    // sightings above. The formatting lives in lib/diagnostics.js so it can be
+    // tested without a browser.
+    case 'getDiagnostics': {
+      const stored = await chrome.storage.local.get(['history', 'updateSource', 'updateCache']);
+      return {
+        ok: true,
+        report: Diagnostics.buildReport({
+          now: Date.now(),
+          extension: {
+            name: chrome.runtime.getManifest().name,
+            version: currentVersion(),
+            id: chrome.runtime.id
+          },
+          browser: navigator.userAgent,
+          platform: (navigator.userAgentData && navigator.userAgentData.platform) || '',
+          folder: { chosen: false, extensionFolderGranted: msg.extensionFolderGranted === true },
+          updateSource: stored.updateSource || null,
+          updateInfo: stored.updateCache || null,
+          otherExtensions: Array.from(otherDownloaders.values())
+            .sort((a, b) => b.lastAt - a.lastAt),
+          history: stored.history || [],
+          historyLimit: 5
+        })
+      };
     }
 
     case 'clearHistory':

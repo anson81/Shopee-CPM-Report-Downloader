@@ -160,6 +160,62 @@ async function main() {
     );
   }
 
+  // 6. Abstaining is not the same as not looking.
+  //
+  //    The listener sees the id of every extension that starts a download, and
+  //    that id is the fact the August 2026 hunt lacked. Recording it must not
+  //    change the abstention, so both are asserted on the same run: nothing
+  //    said, and the sighting kept.
+  {
+    const { listener, evaluate } = bootWorker({ sessionDelayMs: 0 });
+    await settle(20);
+
+    const { returned, calls } = ask(listener, twinDownload);
+    ask(listener, twinDownload);
+    await settle(100);
+
+    check(
+      'recording a sighting does not make us answer',
+      calls.length === 0 && returned !== true,
+      calls.length ? `answered ${JSON.stringify(calls[0])}` : ''
+    );
+
+    const seen = evaluate('Array.from(otherDownloaders.values())');
+    const twin = seen.find((s) => s.id === TWIN_ID);
+
+    check(
+      'the twin is recorded by id',
+      !!twin,
+      seen.length ? JSON.stringify(seen) : 'nothing recorded — a diagnostics report would say "none seen"'
+    );
+
+    check(
+      'repeat downloads are counted, not duplicated',
+      seen.length === 1 && twin && twin.count === 2,
+      JSON.stringify(seen)
+    );
+  }
+
+  // 7. Our own downloads are ours; recording them as interference would point
+  //    the next investigation straight at ourselves.
+  {
+    const { listener, evaluate } = bootWorker({ sessionDelayMs: 0 });
+    await settle(20);
+    ask(listener, {
+      id: 88,
+      url: 'data:application/vnd.ms-excel;base64,AAAA',
+      finalUrl: 'data:application/vnd.ms-excel;base64,AAAA',
+      filename: 'download.xlsx',
+      byExtensionId: OWN_ID,
+    });
+    await settle(100);
+    check(
+      'our own download is not recorded as another extension',
+      evaluate('otherDownloaders.size') === 0,
+      JSON.stringify(evaluate('Array.from(otherDownloaders.values())'))
+    );
+  }
+
   report.finish();
 }
 
