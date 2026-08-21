@@ -154,7 +154,10 @@ function bootWorker({ session = {}, sessionDelayMs = 0, downloads = {}, tabs = {
   // itself would.
   const evaluate = (expression) => vm.runInContext(expression, sandbox);
 
-  return { listener, listeners, chrome, sandbox, evaluate };
+  // sessionStore is handed back so a test can boot a SECOND worker with what
+  // the first one left behind - which is the only way to check that anything
+  // survives eviction, and eviction is the thing under suspicion.
+  return { listener, listeners, chrome, sandbox, evaluate, sessionStore };
 }
 
 /** Fires the filename listener and reports everything Chrome would observe. */

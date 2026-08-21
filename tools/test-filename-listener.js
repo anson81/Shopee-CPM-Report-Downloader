@@ -216,6 +216,42 @@ async function main() {
     );
   }
 
+  // 8. THE LOG MUST OUTLIVE THE WORKER THAT WROTE IT.
+  //
+  //    v1.17.0 kept the decisions in memory only. The first report after a real
+  //    run came back with the section missing entirely - the worker had already
+  //    been evicted in the two minutes between the run and the button press. An
+  //    instrument wiped by the event it exists to catch is not an instrument,
+  //    and worker eviction is the leading suspect for the bug itself.
+  {
+    const first = bootWorker({ sessionDelayMs: 0 });
+    await settle(20);
+    ask(first.listener, twinDownload);
+    await settle(60); // the flush is scheduled, not awaited, by design
+
+    const saved = first.sessionStore.filenameDecisions;
+    check(
+      'the decision log is written to session storage',
+      Array.isArray(saved) && saved.length > 0,
+      saved ? JSON.stringify(saved).slice(0, 120) : 'nothing was persisted'
+    );
+
+    // A brand new worker, handed only what the dead one left behind.
+    const second = bootWorker({ sessionDelayMs: 0, session: first.sessionStore });
+    await settle(60);
+    const restored = second.evaluate('filenameDecisions');
+    check(
+      'a fresh worker reads back what the previous one recorded',
+      Array.isArray(restored) && restored.length > 0,
+      restored ? JSON.stringify(restored).slice(0, 120) : 'the log did not survive'
+    );
+
+    check(
+      'and the worker reports its own start time, so its age is checkable',
+      typeof second.evaluate('workerStartedAt') === 'number'
+    );
+  }
+
   report.finish();
 }
 

@@ -211,6 +211,19 @@ check('the report says why the listener abstained',
   decided);
 check('and names the extension when one started the download',
   decided.indexOf('started by extension abc123') !== -1);
+// The number that decides the leading theory, so it has to be there.
+const aged = D.buildReport({
+  now: NOW,
+  extension: { name: 'X', version: '1.0.0' },
+  workerStartedAt: NOW - 90000
+});
+check('the report says how old the background worker is',
+  aged.indexOf('Background worker started') !== -1 && aged.indexOf('2 min ago') !== -1,
+  aged);
+check('and leaves the line out when it was not supplied',
+  D.buildReport({ now: NOW, extension: { name: 'X', version: '1.0.0' } })
+    .indexOf('Background worker started') === -1);
+
 check('no decisions recorded means the section is left out entirely',
   D.buildReport({ now: NOW, extension: { name: 'X', version: '1.0.0' } })
     .indexOf('what the filename listener decided') === -1);

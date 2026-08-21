@@ -164,6 +164,17 @@ function persistRun() {
  * in what a restart wiped.
  */
 async function hydrateRun() {
+  // The decision log is restored even when a run is not in progress: the whole
+  // point is to still be readable after the worker that recorded it has gone.
+  try {
+    const stored = await chrome.storage.session.get(['filenameDecisions', 'previousWorkerStartedAt']);
+    if (Array.isArray(stored.filenameDecisions) && !filenameDecisions.length) {
+      filenameDecisions = stored.filenameDecisions.slice(0, DECISION_LIMIT);
+    }
+  } catch (_) {
+    /* the log is a convenience; never let it sink a run */
+  }
+
   if (state.running) return;
   try {
     const { runtimeState } = await chrome.storage.session.get('runtimeState');
@@ -675,7 +686,46 @@ const otherDownloaders = new Map();
  * listener must not do work before it returns.
  */
 const DECISION_LIMIT = 24;
-const filenameDecisions = [];
+let filenameDecisions = [];
+
+/**
+ * WHEN THIS WORKER STARTED.
+ *
+ * MV3 stops an idle service worker after about 30 seconds, and everything in
+ * memory dies with it. A worker that restarts DURING a run is the leading
+ * suspect for the 21 Aug 2026 failures: the listener is then woken by the very
+ * download it is being asked about, has nothing in memory, and answers late -
+ * by which time Chrome has already settled on a name and put the file in plain
+ * Downloads. That is exactly what its download history shows, and it explains
+ * why the same code failed twice and then worked.
+ *
+ * Comparing this against when the run started is the difference between a
+ * theory and a fact, so the report carries it.
+ */
+const workerStartedAt = Date.now();
+
+/**
+ * THE LOG HAS TO OUTLIVE THE WORKER, OR IT IS USELESS EXACTLY WHEN IT MATTERS.
+ *
+ * v1.17.0 kept these in memory only. The first report after a successful run
+ * came back with the section missing entirely - the worker had already been
+ * evicted in the two minutes between the run finishing and the button being
+ * pressed. An instrument that is wiped by the event it is meant to catch is
+ * not an instrument.
+ *
+ * storage.session survives worker restarts, is cleared when Chrome closes, and
+ * never touches disk. The write is SCHEDULED from the listener but runs after
+ * it returns: scheduling is synchronous and cheap, and this listener must not
+ * do work before returning - that mistake has been made twice already.
+ */
+let decisionFlush = null;
+
+function flushDecisions() {
+  decisionFlush = null;
+  chrome.storage.session
+    .set({ filenameDecisions, workerStartedAt })
+    .catch(() => { /* diagnostics must never sink a run */ });
+}
 
 function noteDecision(item, reason) {
   filenameDecisions.unshift({
@@ -686,6 +736,7 @@ function noteDecision(item, reason) {
     reason: reason
   });
   if (filenameDecisions.length > DECISION_LIMIT) filenameDecisions.length = DECISION_LIMIT;
+  if (!decisionFlush) decisionFlush = setTimeout(flushDecisions, 0);
 }
 
 function noteOtherDownloader(id, at) {
@@ -1856,6 +1907,7 @@ async function handle(msg, sender) {
           otherExtensions: Array.from(otherDownloaders.values())
             .sort((a, b) => b.lastAt - a.lastAt),
           decisions: filenameDecisions,
+          workerStartedAt,
           history: stored.history || [],
           historyLimit: 5
         })

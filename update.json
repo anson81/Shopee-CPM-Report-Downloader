@@ -1,8 +1,8 @@
 {
-    "version":  "1.17.0",
+    "version":  "1.17.1",
     "notes":  [
-                  "The error message no longer blames another extension. Chrome\u0027s own download history for the failed runs on 21 August shows no other extension touched those files - this one simply did not answer when Chrome asked where to put them. Saying otherwise sent the search in the wrong direction.",
-                  "Copy diagnostics now records WHY each file was or was not placed, one line per download. The report could previously say a file went astray but not which of several reasons caused it, so it guessed. Run the reports once more and copy the diagnostics - that will name the cause."
+                  "The diagnostics now survive the extension going to sleep. Chrome stops an extension\u0027s background worker after about 30 seconds idle, and everything it remembered goes with it - which is why the last report came back with the new section missing entirely, two minutes after a run.",
+                  "It also reports how old that background worker is. If the worker is younger than the run it is describing, Chrome restarted it in the middle - and that is the leading explanation for reports landing loose in Downloads while no other extension has touched them."
               ],
     "files":  [
                   "background/background.js",
