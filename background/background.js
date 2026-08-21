@@ -1784,7 +1784,10 @@ async function handle(msg, sender) {
           },
           browser: navigator.userAgent,
           platform: (navigator.userAgentData && navigator.userAgentData.platform) || '',
-          folder: { chosen: false, extensionFolderGranted: msg.extensionFolderGranted === true },
+          // null, not false: this extension has never had a reports-folder
+          // option, and reporting "no" sends the reader looking for a setting
+          // that does not exist. The SiteGiant twin does have one.
+          folder: { chosen: null, extensionFolderGranted: msg.extensionFolderGranted === true },
           updateSource: stored.updateSource || null,
           updateInfo: stored.updateCache || null,
           otherExtensions: Array.from(otherDownloaders.values())

@@ -1,8 +1,8 @@
 {
-    "version":  "1.16.1",
+    "version":  "1.16.2",
     "notes":  [
-                  "The diagnostics report now says \u0027not collected\u0027 where it means it, instead of \u0027none\u0027. Saying \u0027none seen\u0027 about something that was never looked at reads as evidence, and would send whoever is reading the report looking in the wrong place.",
-                  "It also reads the record shape the SiteGiant extension uses, so the same report format works across all three extensions."
+                  "Three things the report was getting wrong, found the first time it was used for real. It said the update check had never run, when it had - the time was stored under a name it was not reading. It said no reports folder was chosen, when this extension has never had that option at all. And where a report already described itself, the numbers were printed twice.",
+                  "None of these were guesses. A report that is confidently wrong is worse than no report, because it sends whoever is reading it somewhere else."
               ],
     "files":  [
                   "background/background.js",
