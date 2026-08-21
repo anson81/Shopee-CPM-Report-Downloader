@@ -20,6 +20,20 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') {
     throw "Version must look like 1.2.0 (got '$Version')."
 }
 
+# --- run the tests ----------------------------------------------------------
+Write-Host 'Running tests...'
+# Discovered, not listed. A hardcoded list silently stops covering the newest
+# test - which is always the one guarding the newest mistake. This matches
+# what .github/workflows/tests.yml runs, so a release cannot pass here and
+# fail there.
+$tests = Get-ChildItem -Path $PSScriptRoot -Filter 'test-*.js' -File | Sort-Object Name
+if (-not $tests) { throw 'No tests found in tools/ - releasing blind is not a release.' }
+foreach ($test in $tests) {
+    & node $test.FullName | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "$($test.Name) failed - fix it before releasing." }
+    Write-Host "  ok  $($test.Name)"
+}
+
 # --- update manifest.json ---------------------------------------------------
 # Edited as text, not round-tripped through ConvertTo-Json: that reformats the
 # whole file and can collapse single-element arrays, which would quietly break
@@ -38,6 +52,17 @@ if ($check.version -ne $Version) { throw "manifest.json version did not take." }
 if (-not $check.content_scripts -or $check.content_scripts.Count -lt 2) {
     throw 'manifest.json lost its content_scripts — restore it from git.'
 }
+# Refusing an unchanged version is not pedantry.
+#
+# checkUpdate() compares version numbers and nothing else, so shipping
+# changes under a version already in the wild means no machine is ever
+# offered them - silently. Re-running this with the same number also
+# rewrites update.json's notes, which is how a real release note gets
+# replaced by whatever was typed to test the script.
+if ($old -eq $Version) {
+    throw "manifest.json is already at $Version. Never ship changes on an unchanged version number."
+}
+
 Write-Host "manifest.json: $old -> $Version"
 
 # --- collect the files that make up the extension ---------------------------

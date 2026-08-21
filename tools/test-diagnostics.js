@@ -121,6 +121,33 @@ check('keeps a per-report failure and its message',
 
 check('keeps the successful report filename', report.indexOf('gmv.csv') !== -1);
 
+// The sibling extensions spell a report record differently. One builder has to
+// read both, or the SiteGiant report silently comes out as a list of '?'.
+const twinShaped = D.buildReport({
+  now: NOW,
+  extension: { name: 'Twin', version: '1.0.0' },
+  history: [{
+    at: NOW - 60000,
+    folder: '/home/anson/SiteGiant',
+    reports: [{
+      id: 'orders',
+      label: 'Orders with products',
+      status: 'failed',
+      message: 'SiteGiant never produced the export',
+      counts: { created: 3, updated: 4, unchanged: 5 }
+    }]
+  }]
+});
+check('reads the label/message shape too',
+  twinShaped.indexOf('Orders with products') !== -1 &&
+  twinShaped.indexOf('SiteGiant never produced the export') !== -1,
+  twinShaped);
+check('reports the import counts when there are any',
+  twinShaped.indexOf('3 new, 4 updated, 5 unchanged') !== -1);
+check('masks the home directory in that shape as well',
+  twinShaped.indexOf('/home/<you>/SiteGiant') !== -1 &&
+  twinShaped.indexOf('/home/anson') === -1);
+
 // The one that would quietly ruin this: a name leaking through any field at all.
 check('NO home directory name anywhere in the report',
   report.indexOf('QFM Zaty') === -1,
@@ -142,6 +169,26 @@ check('builds from nothing at all without throwing', (function () {
   try { D.buildReport(); D.buildReport({}); return true; } catch (e) { return false; }
 })());
 
+// "None seen" is evidence; "not collected" is the absence of it. Reporting the
+// second as the first would send whoever reads this looking somewhere else
+// entirely - the Review Media Extractor registers no filename listener at all,
+// by design, so it has nothing to say here and must say so in those words.
+const notCollected = D.buildReport({
+  now: NOW,
+  extension: { name: 'X', version: '1.0.0' },
+  otherExtensions: null,
+  history: null
+});
+check('an explicit null says not collected, not none',
+  notCollected.indexOf('not collected') !== -1 &&
+  notCollected.indexOf('none seen') === -1,
+  notCollected);
+check('an explicit null history says not kept, not none recorded',
+  notCollected.indexOf('not kept') !== -1 &&
+  notCollected.indexOf('no runs recorded') === -1);
+check('a MISSING key still means empty, not not-collected',
+  empty.indexOf('none seen') !== -1 && empty.indexOf('not collected') === -1);
+
 console.log('wiring');
 
 // A button that does nothing fails silently and looks fine, which is the worst
@@ -157,22 +204,42 @@ const optsJs = read('options/options.js');
 const optsCss = read('options/options.css');
 const bg = read('background/background.js');
 
+// Checked by behaviour rather than by spelling: these three extensions grew up
+// separately and reach for elements differently - `el.x` in one, `$('x')` in
+// another. A guard that insisted on one house style would fail on a repo that
+// is perfectly wired, and teach everyone to ignore it.
 check('the page has the button', html.indexOf('id="copy-diagnostics"') !== -1);
 check('the page has somewhere to show the report', html.indexOf('id="diagnostics"') !== -1);
-check('options.js looks the button up', optsJs.indexOf("getElementById('copy-diagnostics')") !== -1);
+check('options.js reaches for the button', optsJs.indexOf("'copy-diagnostics'") !== -1);
 check('the button is actually wired to a click',
-  optsJs.indexOf("el.copyDiagnostics.addEventListener('click'") !== -1);
+  optsJs.indexOf("addEventListener('click', copyDiagnostics)") !== -1);
 check('the click asks the worker for the report',
   optsJs.indexOf("'getDiagnostics'") !== -1);
 check('the worker answers that message', bg.indexOf("case 'getDiagnostics'") !== -1);
 check('the worker loads the builder', bg.indexOf('lib/diagnostics.js') !== -1);
-check('the report is shown, not only copied', optsJs.indexOf('el.diagnostics.textContent') !== -1);
+check('the report is shown, not only copied',
+  optsJs.indexOf('textContent = res.report') !== -1);
+check('there is a fallback when the clipboard refuses',
+  optsJs.indexOf('clipboard') !== -1 && optsJs.indexOf('select the text below') !== -1);
 check('the preview is styled', optsCss.indexOf('.diagnostics') !== -1);
 
-// The sightings are the reason this exists; a listener that stopped recording
-// them would leave the report saying "none seen" on a machine full of them.
-check('the filename listener records other extensions',
-  bg.indexOf('noteOtherDownloader') !== -1);
+// The sightings are the reason this exists - but only two of these three
+// extensions have a filename listener at all. The third must NOT have one, and
+// asserting that it records sightings would be asserting that it broke its own
+// rule. So the rule adapts to the file: whichever way this repo is built, the
+// report has to tell the truth about it.
+const hasListener = bg.indexOf('onDeterminingFilename.addListener') !== -1;
+
+if (hasListener) {
+  check('the filename listener records other extensions',
+    bg.indexOf('noteOtherDownloader') !== -1);
+  check('the report is given the sightings, not null',
+    bg.indexOf('otherExtensions: Array.from(otherDownloaders') !== -1);
+} else {
+  check('no listener, so the report says not collected rather than none',
+    bg.indexOf('otherExtensions: null') !== -1,
+    'this extension registers no filename listener, so it cannot honestly report "none seen"');
+}
 
 console.log('');
 if (failures) {
