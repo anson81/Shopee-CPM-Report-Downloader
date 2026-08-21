@@ -1,8 +1,8 @@
 {
-    "version":  "1.16.0",
+    "version":  "1.16.1",
     "notes":  [
-                  "A Copy diagnostics button, on the Options page. When something goes wrong on a computer nobody can look at, one click puts the details on the clipboard - version, browser, the last few runs with every error, and which other extensions have been handling downloads. Paste it to whoever is fixing it. Nothing is sent anywhere by itself, and the page shows you every word before you copy it.",
-                  "Your Windows or Mac username is removed from the folder paths, so the report can be forwarded without a second thought. The folders themselves are kept, because that is usually where the answer is."
+                  "The diagnostics report now says \u0027not collected\u0027 where it means it, instead of \u0027none\u0027. Saying \u0027none seen\u0027 about something that was never looked at reads as evidence, and would send whoever is reading the report looking in the wrong place.",
+                  "It also reads the record shape the SiteGiant extension uses, so the same report format works across all three extensions."
               ],
     "files":  [
                   "background/background.js",
