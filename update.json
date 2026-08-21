@@ -1,8 +1,8 @@
 {
-    "version":  "1.17.1",
+    "version":  "1.18.0",
     "notes":  [
-                  "The diagnostics now survive the extension going to sleep. Chrome stops an extension\u0027s background worker after about 30 seconds idle, and everything it remembered goes with it - which is why the last report came back with the new section missing entirely, two minutes after a run.",
-                  "It also reports how old that background worker is. If the worker is younger than the run it is describing, Chrome restarted it in the middle - and that is the leading explanation for reports landing loose in Downloads while no other extension has touched them."
+                  "Fixes one real cause of reports landing loose in Downloads. If Chrome restarted the extension in the middle of a run, it forgot which folder the run was using and then built a broken path from the blank - \u0027Shopee daily report//report.xlsx\u0027. Chrome rejects a path like that without saying so and uses its own name instead, which is where \u0027download (9).xlsx\u0027 came from.",
+                  "It now waits for the folder to be known instead of guessing, and if it still is not known it says so plainly rather than saving somewhere wrong. This may not be the only cause; if a run still misplaces files, press Copy diagnostics and the report will name the reason."
               ],
     "files":  [
                   "background/background.js",

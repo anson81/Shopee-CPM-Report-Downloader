@@ -252,6 +252,68 @@ async function main() {
     );
   }
 
+  // 9. NEVER BUILD A PATH OUT OF A FOLDER WE DO NOT HAVE.
+  //
+  //    A worker Chrome restarted mid-run has an empty state.folder until
+  //    hydration finishes. targetDir() used to interpolate it regardless,
+  //    producing "Shopee daily report//report.xlsx" - a path with an empty
+  //    segment, which Chrome rejects without complaining and replaces with its
+  //    own name, "download.xlsx". That is why the 21 Aug retry landed as
+  //    "download (9).xlsx" even though downloads.download({filename}) is
+  //    honoured whenever no listener overrides it: the filename was never
+  //    valid.
+  //
+  //    So: a run in progress, but no folder known yet.
+  {
+    const { listener, evaluate } = bootWorker({
+      sessionDelayMs: 0,
+      session: { runtimeState: { running: true, folder: '', runFolder: '' } },
+    });
+    await settle(40);
+
+    check(
+      'the harness really did leave the folder empty',
+      evaluate('state.running') === true && !evaluate('state.folder'),
+      `running=${evaluate('state.running')} folder=${JSON.stringify(evaluate('state.folder'))}`
+    );
+
+    check(
+      'targetDir refuses rather than inventing a path with an empty segment',
+      evaluate('targetDir()') === null,
+      JSON.stringify(evaluate('targetDir()'))
+    );
+
+    const { returned, calls } = ask(listener, {
+      id: 77,
+      url: 'https://seller.shopee.com.my/api/export/report.xlsx',
+      finalUrl: 'https://seller.shopee.com.my/api/export/report.xlsx',
+      referrer: 'https://seller.shopee.com.my/datacenter/product/overview',
+      filename: 'report.xlsx',
+    });
+    await settle(80);
+
+    // Abstaining leaves Chrome's own name, which is wrong but honest. Answering
+    // with "Shopee daily report//report.xlsx" is wrong AND looks deliberate.
+    const suggested = calls[0] && calls[0].filename;
+    check(
+      'and the listener never suggests a path containing an empty segment',
+      !suggested || suggested.indexOf('//') === -1,
+      suggested ? `suggested ${suggested}` : 'abstained, which is correct here'
+    );
+
+    check(
+      'the reason recorded says the folder was not known',
+      String(evaluate('lastDecisionReason')).indexOf('folder') !== -1,
+      String(evaluate('lastDecisionReason'))
+    );
+
+    check(
+      'returning true is still not on the table',
+      returned !== true,
+      'returned true, which commits Chrome to waiting for an answer'
+    );
+  }
+
   report.finish();
 }
 

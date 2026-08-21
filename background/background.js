@@ -252,8 +252,30 @@ function reportDay(now, realtimeDate) {
   return parseYmd(realtimeDate) || now;
 }
 
-/** Where this run's files go, relative to Downloads. */
+/**
+ * Where this run's files go, relative to Downloads - or null when that is not
+ * known yet.
+ *
+ * WHY IT CAN RETURN NULL.
+ *
+ * This used to interpolate `state.folder` whatever it held. On a service worker
+ * that Chrome had restarted mid-run, that field is empty until hydration
+ * finishes, and the result was "Shopee daily report//report.xlsx" - a path with
+ * an empty segment. Chrome does not accept that and does not complain either:
+ * it discards the filename and falls back to its own, which is "download.xlsx",
+ * then "download (9).xlsx".
+ *
+ * That is not a theory about the 21 Aug 2026 failures, it is arithmetic on the
+ * strings involved, and it explains the half that puzzled me most - why the
+ * RETRY also landed loose, when downloads.download({filename}) is honoured
+ * whenever no listener overrides it. The filename was never valid.
+ *
+ * Callers must handle null rather than build a path out of it. There is no
+ * useful path to guess here: writing to the wrong folder is worse than saying
+ * the folder is not known.
+ */
 function targetDir() {
+  if (!state.folder) return null;
   return state.runFolder
     ? `${ROOT_FOLDER}/${state.folder}/${state.runFolder}`
     : `${ROOT_FOLDER}/${state.folder}`;
@@ -635,9 +657,14 @@ function decideDownloadPath(item) {
     state.watch.capturedId = item.id;
     state.watch.capturedName = name;
     persistRun();
-    lastDecisionReason = 'placed at ' + targetDir() + '/' + name;
+    const dir = targetDir();
+    if (!dir) {
+      lastDecisionReason = 'abstained: run folder not known yet (worker restarted mid-run?)';
+      return null;
+    }
+    lastDecisionReason = 'placed at ' + dir + '/' + name;
     return {
-      filename: `${targetDir()}/${name}`,
+      filename: `${dir}/${name}`,
       conflictAction: 'overwrite'
     };
   } catch (err) {
@@ -907,7 +934,24 @@ async function saveFile(dataUrl, filename) {
     return { ok: false, error: 'Nothing to save — the captured file was empty.' };
   }
   const name = basename(filename) || 'shopee-report';
-  const path = `${targetDir()}/${name}`;
+
+  // Wait for the run folder rather than guessing at it.
+  //
+  // Unlike the filename listener, this runs inside the run's own async flow, so
+  // it is free to wait - and hydration is the difference between a real path
+  // and "Shopee daily report//name", which Chrome silently replaces with
+  // "download.xlsx". Waiting costs a moment; guessing cost a whole run.
+  if (!targetDir()) await hydrating;
+
+  const dir = targetDir();
+  if (!dir) {
+    return {
+      ok: false,
+      error: `Cannot save "${name}": this run's folder is not known. ` +
+        'Chrome most likely restarted the extension mid-run. Run the report again.'
+    };
+  }
+  const path = `${dir}/${name}`;
 
   let id;
   try {
@@ -1481,7 +1525,7 @@ async function findRunDownload(expected) {
 function strayMessage(name, path, extra) {
   return (
     `Chrome saved "${name}" to ${path || 'your Downloads folder'} instead of ` +
-    `${targetDir()}.${extra ? ` ${extra}` : ''} ` +
+    `${targetDir() || "this run's folder"}.${extra ? ` ${extra}` : ''} ` +
     'Open the Options page and click Copy diagnostics - it now records why the file was not placed, which is the only way to tell. ' +
     'then run this report again.'
   );
@@ -1567,7 +1611,7 @@ async function confirmDownload(res, ctx) {
 
   throw new AppError(
     `Shopee started the download for "${res.filename || 'this report'}" but it ` +
-      `never arrived in ${targetDir()}. ` +
+      `never arrived in ${targetDir() || "this run's folder"}. ` +
       'Open the Options page and click Copy diagnostics - it now records why the file was not placed, which is the only way to tell. Then run ' +
       'this report again.'
   );
