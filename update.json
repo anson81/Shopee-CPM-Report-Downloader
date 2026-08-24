@@ -1,10 +1,8 @@
 {
-    "version": "1.19.0",
+    "version": "1.19.1",
     "notes": [
-        "Reports now save into a folder you choose instead of Chrome's Downloads folder. Open the popup, click Settings, and pick one - Documents, for example. Every run then goes into 'Shopee daily report' inside it, in a folder named for the date and time, like 'Shopee daily report/24082026-Monday-0915'.",
-        "This also ends files arriving as 'download (12).xlsx'. The extension now writes each file itself, so no other extension can rename it or put it somewhere else, and the name Shopee gave the file is the name you get.",
-        "It will not start a run until you have chosen a folder. Until you do there is nowhere safe to put the files, and saving them somewhere you did not ask for is the problem this release exists to fix.",
-        "The Real Time date now goes back to today after one run. Pinning it to catch up on a missed night no longer quietly sends every later run to that same old folder."
+        "Adds an 'Open folder' button beside Settings in the popup. It opens a folder window straight at the run you just downloaded - for example 'Shopee daily report/24082026-Monday-0915' - so you do not have to go looking for it.",
+        "One honest limit: Chrome does not let an extension open your normal file manager window at a folder it did not download into. This opens Chrome's own folder window instead. You can see and open every file in it; close it when you are done."
     ],
     "files": [
         "README.md",

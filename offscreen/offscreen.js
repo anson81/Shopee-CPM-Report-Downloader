@@ -29,6 +29,14 @@ const DB_NAME = 'shopee-dl-updater';
 const STORE = 'handles';
 /** Where reports go. Deliberately NOT the key the self-updater uses. */
 const OUTPUT_KEY = 'outputFolder';
+/**
+ * The folder the last run actually wrote into.
+ *
+ * Kept so the popup's "Open folder" can start the picker on the files just
+ * saved rather than three levels above them. A handle, not a path: the File
+ * System Access API never discloses a real path, by design.
+ */
+const LAST_RUN_KEY = 'lastRunFolder';
 
 function idb() {
   return new Promise((resolve, reject) => {
@@ -47,6 +55,16 @@ async function idbGet(key) {
     const req = db.transaction(STORE, 'readonly').objectStore(STORE).get(key);
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbSet(key, value) {
+  const db = await idb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
   });
 }
 
@@ -93,6 +111,16 @@ async function write({ segments, filename, base64, probe }) {
   if (probe) return { ok: true, path: '' };
 
   const dir = await folderFor(root, segments);
+
+  // Remembered before the write, not after: a run whose last file failed still
+  // put earlier ones here, and that is still the folder to open. Failing to
+  // remember must never sink the save, so it is swallowed.
+  try {
+    await idbSet(LAST_RUN_KEY, dir);
+  } catch (_) {
+    /* the button falls back to the chosen root */
+  }
+
   const handle = await dir.getFileHandle(filename, { create: true });
   const writable = await handle.createWritable();
   try {

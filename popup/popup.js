@@ -27,6 +27,7 @@ const el = {
   updateText: document.getElementById('update-text'),
   updateAction: document.getElementById('update-action'),
   settings: document.getElementById('settings'),
+  openFolder: document.getElementById('open-folder'),
   where: document.getElementById('where'),
   realtimeDate: document.getElementById('realtime-date'),
   realtimeClear: document.getElementById('realtime-clear'),
@@ -324,6 +325,75 @@ el.runFurious.addEventListener('click', () => start(allIds()));
 el.settings.addEventListener('click', async () => {
   await send({ type: 'openOptions' });
   window.close();
+});
+
+/* ------------------------------------------------------------------ *
+ * Open folder
+ *
+ * WHAT THIS CAN AND CANNOT DO.
+ *
+ * There is no extension API that opens the system file manager at a chosen
+ * folder. `chrome.downloads.show()` is the only reveal Chrome offers and it
+ * needs a download id - which these files deliberately no longer have, because
+ * going through chrome.downloads is what put them in the wrong folder for three
+ * weeks. The File System Access API never discloses a real path either, so
+ * there is nothing to hand to anything else.
+ *
+ * What IS possible: open Chrome's own folder window starting at a handle we
+ * already hold. `startIn` accepts a FileSystemHandle, so this lands on the run
+ * folder itself - the files just saved - rather than the root.
+ *
+ * The picker needs a real click, which this is. The popup closes as the dialog
+ * takes focus; that is expected here and costs nothing, because nothing needs
+ * the popup afterwards.
+ * ------------------------------------------------------------------ */
+const DB_NAME = 'shopee-dl-updater';
+const STORE = 'handles';
+
+function idbGet(key) {
+  return new Promise((resolve) => {
+    let req;
+    try {
+      req = indexedDB.open(DB_NAME, 1);
+    } catch (_) {
+      resolve(null);
+      return;
+    }
+    req.onerror = () => resolve(null);
+    req.onsuccess = () => {
+      try {
+        const get = req.result.transaction(STORE, 'readonly').objectStore(STORE).get(key);
+        get.onsuccess = () => resolve(get.result || null);
+        get.onerror = () => resolve(null);
+      } catch (_) {
+        resolve(null);
+      }
+    };
+  });
+}
+
+el.openFolder.addEventListener('click', async () => {
+  if (!window.showDirectoryPicker) {
+    showBanner('This Chrome build cannot open a folder window.');
+    return;
+  }
+
+  // The run folder if we have one, else the folder they chose. Both beat
+  // nothing, and a fresh install has only the second.
+  const handle = (await idbGet('lastRunFolder')) || (await idbGet('outputFolder'));
+  if (!handle) {
+    showBanner('No folder chosen yet - open Settings and pick one.');
+    return;
+  }
+
+  try {
+    // The handle it returns is deliberately ignored. This is a way of SHOWING
+    // a folder, not of choosing one; whatever they click, the reports folder
+    // is unchanged.
+    await window.showDirectoryPicker({ startIn: handle, id: 'shopee-reports' });
+  } catch (_) {
+    /* closed without picking, which is the normal way to use this */
+  }
 });
 
 el.cancel.addEventListener('click', async () => {

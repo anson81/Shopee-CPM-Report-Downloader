@@ -52,7 +52,7 @@ function fakeDir(log, name, failWrite) {
   };
 }
 
-function boot({ root = undefined } = {}) {
+function boot({ root = undefined, saved = {} } = {}) {
   const source = fs.readFileSync(
     path.join(__dirname, '..', 'offscreen', 'offscreen.js'),
     'utf8'
@@ -69,8 +69,12 @@ function boot({ root = undefined } = {}) {
         setTimeout(() => {
           req.result = {
             objectStoreNames: { contains: () => true },
-            transaction: () => ({
-              objectStore: () => ({
+            transaction: () => {
+              const tx = {};
+              setTimeout(() => {
+                if (tx.oncomplete) tx.oncomplete();
+              }, 0);
+              tx.objectStore = () => ({
                 get() {
                   const r = {};
                   setTimeout(() => {
@@ -78,9 +82,18 @@ function boot({ root = undefined } = {}) {
                     if (r.onsuccess) r.onsuccess();
                   }, 0);
                   return r;
+                },
+                put(value, key) {
+                  saved[key] = value;
+                  const r = {};
+                  setTimeout(() => {
+                    if (r.onsuccess) r.onsuccess();
+                  }, 0);
+                  return r;
                 }
-              })
-            })
+              });
+              return tx;
+            }
           };
           if (req.onsuccess) req.onsuccess();
         }, 0);
@@ -212,4 +225,27 @@ test('a probe still fails when no folder is chosen', async () => {
 
   assert.strictEqual(reply.ok, false);
   assert.strictEqual(reply.reason, 'no-folder');
+});
+
+test('remembers the folder it wrote into, so Open folder can go there', async () => {
+  const log = [];
+  const saved = {};
+  const { send } = boot({ root: fakeDir(log, 'Documents'), saved });
+  await send(MSG);
+
+  // The popup opens the picker at THIS handle - the run folder, not the root -
+  // so a click lands on the files just written rather than three levels above
+  // them.
+  assert.ok(saved.lastRunFolder, 'the run folder handle was not remembered');
+  assert.strictEqual(saved.lastRunFolder.name, '23082026-Sunday-1418');
+});
+
+test('a probe does not overwrite the remembered folder', async () => {
+  const saved = { lastRunFolder: { name: 'from-an-earlier-run' } };
+  const { send } = boot({ root: fakeDir([], 'Documents'), saved });
+  await send({ target: 'offscreen-writer', probe: true, segments: [], filename: '' });
+
+  // The popup probes on every open. If that reset the memory, Open folder
+  // would drift back to the root the first time the popup was looked at.
+  assert.strictEqual(saved.lastRunFolder.name, 'from-an-earlier-run');
 });
