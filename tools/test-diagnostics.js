@@ -306,22 +306,29 @@ check('there is a fallback when the clipboard refuses',
   optsJs.indexOf('clipboard') !== -1 && optsJs.indexOf('select the text below') !== -1);
 check('the preview is styled', optsCss.indexOf('.diagnostics') !== -1);
 
-// The sightings are the reason this exists - but only two of these three
-// extensions have a filename listener at all. The third must NOT have one, and
-// asserting that it records sightings would be asserting that it broke its own
-// rule. So the rule adapts to the file: whichever way this repo is built, the
-// report has to tell the truth about it.
-const hasListener = bg.indexOf('onDeterminingFilename.addListener') !== -1;
+// The sightings are the reason this exists - but not every one of these three
+// extensions collects them, and one must NOT. Asserting that it records
+// sightings would be asserting that it broke its own rule. So the rule adapts
+// to the file: whichever way this repo is built, the report has to tell the
+// truth about it.
+//
+// The question is whether sightings are COLLECTED, not which event collects
+// them. This used to test for a filename listener, because that was the only
+// place noteOtherDownloader() was ever called from. This extension dropped its
+// filename listener in v1.19.0 and now records the same fact from
+// downloads.onCreated, which carries byExtensionId just as well - so "none
+// seen" is still a claim it is entitled to make.
+const collectsSightings = bg.indexOf('noteOtherDownloader(') !== -1;
 
-if (hasListener) {
-  check('the filename listener records other extensions',
+if (collectsSightings) {
+  check('something records the other extensions',
     bg.indexOf('noteOtherDownloader') !== -1);
   check('the report is given the sightings, not null',
     bg.indexOf('otherExtensions: Array.from(otherDownloaders') !== -1);
 } else {
-  check('no listener, so the report says not collected rather than none',
+  check('nothing collects, so the report says not collected rather than none',
     bg.indexOf('otherExtensions: null') !== -1,
-    'this extension registers no filename listener, so it cannot honestly report "none seen"');
+    'this extension records no sightings, so it cannot honestly report "none seen"');
 }
 
 console.log('');

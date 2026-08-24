@@ -13,6 +13,20 @@
 
     <main>
       <section class="card">
+        <h2>Reports folder</h2>
+        <p class="hint">
+          Where your reports are saved. Pick it once on this computer &mdash;
+          for example <em>Documents</em>. Reports are written straight into it,
+          so no other extension can rename them or move them somewhere else.
+        </p>
+        <div id="output-status" class="status">No folder chosen yet.</div>
+        <div class="row">
+          <button id="pick-output" class="primary">Choose folder&hellip;</button>
+          <button id="forget-output" hidden>Forget it</button>
+        </div>
+      </section>
+
+      <section class="card">
         <h2>Updates</h2>
         <div id="status" class="status">Checking…</div>
         <ul id="notes" class="notes" hidden></ul>

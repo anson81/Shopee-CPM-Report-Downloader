@@ -21,6 +21,9 @@ const el = {
   folderStatus: document.getElementById('folder-status'),
   pickFolder: document.getElementById('pick-folder'),
   forgetFolder: document.getElementById('forget-folder'),
+  outputStatus: document.getElementById('output-status'),
+  pickOutput: document.getElementById('pick-output'),
+  forgetOutput: document.getElementById('forget-output'),
   owner: document.getElementById('owner'),
   repo: document.getElementById('repo'),
   branch: document.getElementById('branch'),
@@ -121,9 +124,15 @@ async function copyDiagnostics() {
   el.copyDiagnostics.disabled = true;
   el.diagnosticsCopied.hidden = true;
 
+  // The reports folder handle lives in IndexedDB on this page's origin; the
+  // service worker cannot see it, so it is passed in rather than looked up.
+  const output = await idbGet(OUTPUT_KEY).catch(() => null);
+
   const res = await send({
     type: 'getDiagnostics',
-    extensionFolderGranted: !!folderHandle
+    extensionFolderGranted: !!folderHandle,
+    reportsFolder: !!output,
+    reportsFolderName: output ? output.name : ''
   });
 
   if (!res || !res.ok || !res.report) {
@@ -281,6 +290,81 @@ el.forgetFolder.addEventListener('click', async () => {
 });
 
 /* ------------------------------------------------------------------ *
+ * The reports folder
+ *
+ * Deliberately a different IndexedDB key from the extension folder above.
+ * They are two separate grants for two separate purposes — one lets the
+ * updater rewrite this extension's own files, the other is where the seller's
+ * reports go — and revoking one must never quietly revoke the other.
+ *
+ * There is no verifyFolder() equivalent here on purpose. Any folder is a
+ * legitimate choice; refusing one would be this extension deciding where
+ * somebody else's files belong.
+ * ------------------------------------------------------------------ */
+const OUTPUT_KEY = 'outputFolder';
+
+/**
+ * Shows what is chosen, and whether Chrome still lets us write to it.
+ *
+ * A handle survives a browser restart but its permission does not always come
+ * back with it. Saying "chosen" when writes would fail is the kind of quiet
+ * wrongness this extension has already shipped once.
+ */
+async function refreshOutputStatus() {
+  const handle = await idbGet(OUTPUT_KEY).catch(() => null);
+  if (!handle) {
+    setStatus(
+      el.outputStatus,
+      'No folder chosen yet — reports cannot be saved until you pick one.',
+      'warn'
+    );
+    el.forgetOutput.hidden = true;
+    el.pickOutput.textContent = 'Choose folder…';
+    return null;
+  }
+
+  const granted = await handlePermission(handle, false);
+  setStatus(
+    el.outputStatus,
+    granted
+      ? `Saving reports to: ${handle.name}`
+      : `Chosen earlier (${handle.name}) — Chrome needs you to allow it again. ` +
+          'Click "Choose a different folder" and pick the same one.',
+    granted ? 'ok' : 'warn'
+  );
+  el.forgetOutput.hidden = false;
+  el.pickOutput.textContent = 'Choose a different folder…';
+  return handle;
+}
+
+el.pickOutput.addEventListener('click', async () => {
+  if (!window.showDirectoryPicker) {
+    setStatus(el.outputStatus, 'This Chrome build has no directory picker.', 'err');
+    return;
+  }
+  let handle;
+  try {
+    handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+  } catch (_) {
+    return; // the picker was closed
+  }
+  // Asked for straight from the click: requestPermission() needs user
+  // activation, and the offscreen writer has none, so this is the only place
+  // the grant can be obtained.
+  if (!(await handlePermission(handle, true))) {
+    setStatus(el.outputStatus, 'Write permission was declined.', 'err');
+    return;
+  }
+  await idbSet(OUTPUT_KEY, handle);
+  await refreshOutputStatus();
+});
+
+el.forgetOutput.addEventListener('click', async () => {
+  await idbDelete(OUTPUT_KEY);
+  await refreshOutputStatus();
+});
+
+/* ------------------------------------------------------------------ *
  * Checking
  * ------------------------------------------------------------------ */
 function renderNotes(notes) {
@@ -431,6 +515,7 @@ el.install.addEventListener('click', async () => {
 (async function init() {
   el.version.textContent = `v${chrome.runtime.getManifest().version}`;
   await loadSource();
+  await refreshOutputStatus();
   await refreshFolderStatus();
   await checkForUpdate(false);
 })();

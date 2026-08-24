@@ -1,25 +1,29 @@
 {
-    "version":  "1.18.0",
-    "notes":  [
-                  "Fixes one real cause of reports landing loose in Downloads. If Chrome restarted the extension in the middle of a run, it forgot which folder the run was using and then built a broken path from the blank - \u0027Shopee daily report//report.xlsx\u0027. Chrome rejects a path like that without saying so and uses its own name instead, which is where \u0027download (9).xlsx\u0027 came from.",
-                  "It now waits for the folder to be known instead of guessing, and if it still is not known it says so plainly rather than saving somewhere wrong. This may not be the only cause; if a run still misplaces files, press Copy diagnostics and the report will name the reason."
-              ],
-    "files":  [
-                  "background/background.js",
-                  "content/content.js",
-                  "content/interceptor.js",
-                  "icons/icon128.png",
-                  "icons/icon16.png",
-                  "icons/icon48.png",
-                  "lib/diagnostics.js",
-                  "manifest.json",
-                  "options/options.css",
-                  "options/options.html",
-                  "options/options.js",
-                  "popup/popup.css",
-                  "popup/popup.html",
-                  "popup/popup.js",
-                  "README.md",
-                  "update.json"
-              ]
+    "version": "1.19.0",
+    "notes": [
+        "Reports now save into a folder you choose instead of Chrome's Downloads folder. Open the popup, click Settings, and pick one - Documents, for example. Every run then goes into 'Shopee daily report' inside it, in a folder named for the date and time, like 'Shopee daily report/24082026-Monday-0915'.",
+        "This also ends files arriving as 'download (12).xlsx'. The extension now writes each file itself, so no other extension can rename it or put it somewhere else, and the name Shopee gave the file is the name you get.",
+        "It will not start a run until you have chosen a folder. Until you do there is nowhere safe to put the files, and saving them somewhere you did not ask for is the problem this release exists to fix.",
+        "The Real Time date now goes back to today after one run. Pinning it to catch up on a missed night no longer quietly sends every later run to that same old folder."
+    ],
+    "files": [
+        "README.md",
+        "background/background.js",
+        "content/content.js",
+        "content/interceptor.js",
+        "icons/icon128.png",
+        "icons/icon16.png",
+        "icons/icon48.png",
+        "lib/diagnostics.js",
+        "manifest.json",
+        "offscreen/offscreen.html",
+        "offscreen/offscreen.js",
+        "options/options.css",
+        "options/options.html",
+        "options/options.js",
+        "popup/popup.css",
+        "popup/popup.html",
+        "popup/popup.js",
+        "update.json"
+    ]
 }

@@ -82,8 +82,10 @@ const state = {
   currentId: null,
   lastExportAt: 0,
   expectedName: '',
-  pendingSavePath: '',
-  lastDownloadId: null,
+  lastSavedPath: '', // where the last report actually landed, for the popup
+  // Copies Chrome made of a report we also saved properly. Reported, never
+  // deleted - removing a seller's files is not this extension's business.
+  strays: [],
   runFolder: null, // one sub-folder per run, so repeat runs stay separate
   realtimeDate: '', // Real Time pinned to an earlier day, or '' for today
   error: '',
@@ -147,7 +149,7 @@ const RUN_KEYS = [
   'folder',
   'runFolder',
   'expectedName',
-  'pendingSavePath',
+  'strays',
   'watch'
 ];
 
@@ -164,17 +166,6 @@ function persistRun() {
  * in what a restart wiped.
  */
 async function hydrateRun() {
-  // The decision log is restored even when a run is not in progress: the whole
-  // point is to still be readable after the worker that recorded it has gone.
-  try {
-    const stored = await chrome.storage.session.get(['filenameDecisions', 'previousWorkerStartedAt']);
-    if (Array.isArray(stored.filenameDecisions) && !filenameDecisions.length) {
-      filenameDecisions = stored.filenameDecisions.slice(0, DECISION_LIMIT);
-    }
-  } catch (_) {
-    /* the log is a convenience; never let it sink a run */
-  }
-
   if (state.running) return;
   try {
     const { runtimeState } = await chrome.storage.session.get('runtimeState');
@@ -185,9 +176,8 @@ async function hydrateRun() {
 }
 
 // Started at module evaluation so a woken worker begins catching up before any
-// event arrives. `hydrated` flips once it has settled, which is what lets the
-// filename listener answer synchronously from then on — see the listener for
-// why that distinction decides whether the file lands in the right folder.
+// event arrives. `hydrated` flips once it has settled; saveFile() waits on it
+// rather than building a path out of a run folder it does not have yet.
 let hydrated = false;
 const hydrating = hydrateRun().then(() => {
   hydrated = true;
@@ -253,32 +243,33 @@ function reportDay(now, realtimeDate) {
 }
 
 /**
- * Where this run's files go, relative to Downloads - or null when that is not
- * known yet.
+ * The folders this run writes into, beneath the folder the seller chose — or
+ * null when the run folder is not known yet.
  *
  * WHY IT CAN RETURN NULL.
  *
  * This used to interpolate `state.folder` whatever it held. On a service worker
  * that Chrome had restarted mid-run, that field is empty until hydration
  * finishes, and the result was "Shopee daily report//report.xlsx" - a path with
- * an empty segment. Chrome does not accept that and does not complain either:
- * it discards the filename and falls back to its own, which is "download.xlsx",
- * then "download (9).xlsx".
- *
- * That is not a theory about the 21 Aug 2026 failures, it is arithmetic on the
- * strings involved, and it explains the half that puzzled me most - why the
- * RETRY also landed loose, when downloads.download({filename}) is honoured
- * whenever no listener overrides it. The filename was never valid.
+ * an empty segment, which Chrome silently replaced with a name of its own.
  *
  * Callers must handle null rather than build a path out of it. There is no
  * useful path to guess here: writing to the wrong folder is worse than saying
  * the folder is not known.
+ *
+ * ONE LEVEL, NOT TWO. The old shape nested a run folder inside a day folder.
+ * `runFolder` already carries the date - "23082026-Sunday-1418" - so the day
+ * folder said nothing the run folder did not, and cost a click every morning.
  */
+function folderSegments() {
+  if (!state.runFolder) return null;
+  return [ROOT_FOLDER, state.runFolder];
+}
+
+/** The same thing as one string, for messages to the user. */
 function targetDir() {
-  if (!state.folder) return null;
-  return state.runFolder
-    ? `${ROOT_FOLDER}/${state.folder}/${state.runFolder}`
-    : `${ROOT_FOLDER}/${state.folder}`;
+  const segments = folderSegments();
+  return segments ? segments.join('/') : null;
 }
 
 function basename(p) {
@@ -598,81 +589,6 @@ function computeParams(ex, realtimeDate) {
 // escape into the plain Downloads folder under Chrome's own name.
 const SHOPEE_HOST_RE = /shopee|susercontent|shopeemobile/i;
 
-// A name Chrome invented because the response carried no useful one.
-const GENERIC_DOWNLOAD_RE =
-  /^(download|attachment|file|export|report)(\s*\(\d+\))?\.(?:xlsx|xls|csv|zip)$/i;
-
-/**
- * Where this download belongs. Returns a suggestion for Chrome, or null to
- * leave the file alone. Pure and synchronous — it only reads state that is
- * already in memory.
- */
-// Set by decideDownloadPath at every exit, read by the listener right after.
-let lastDecisionReason = '';
-
-function decideDownloadPath(item) {
-  lastDecisionReason = 'abstained: no reason recorded';
-  try {
-    // Each of these is a different problem wearing the same face, so each
-    // says which one it is. `lastDecisionReason` is read by the listener
-    // immediately after this returns - synchronous, single-threaded.
-    if (!state.running) { lastDecisionReason = 'abstained: no run in progress'; return null; }
-    if (!state.folder) { lastDecisionReason = 'abstained: state.folder is empty'; return null; }
-    const url = item.url || '';
-
-    // Our own saveFile download. The `filename` passed to downloads.download()
-    // is only a SUGGESTION that any listener — ours or another extension's —
-    // can override, and something on this machine was overriding it, dropping
-    // the file into plain Downloads. Re-assert the path here.
-    if (url.startsWith('data:')) {
-      if (!state.pendingSavePath) {
-        lastDecisionReason = 'abstained: our own data: save, but pendingSavePath is empty';
-        return null;
-      }
-      lastDecisionReason = 'placed our own save at ' + state.pendingSavePath;
-      return { filename: state.pendingSavePath, conflictAction: 'overwrite' };
-    }
-
-    const haystack = [item.url, item.finalUrl, item.referrer]
-      .filter(Boolean)
-      .join(' ');
-    let name = basename(item.filename) || 'shopee-report';
-    const placeholder = GENERIC_DOWNLOAD_RE.test(name);
-
-    // Shopee redirects downloads to hosts with no recognisable branding, so a
-    // host match alone is not enough. Outside those hosts, only step in for a
-    // placeholder name while we are mid-collect — never for a download that
-    // already has a real name of its own.
-    if (!SHOPEE_HOST_RE.test(haystack) && !(placeholder && state.expectedName)) {
-      lastDecisionReason = 'abstained: no shopee host in url/finalUrl/referrer' +
-        (placeholder ? ' (name is a placeholder but expectedName is empty)' : '') +
-        ' | saw: ' + haystack.slice(0, 120);
-      return null;
-    }
-
-    // "download (2).csv" tells us nothing; the content script knows what this
-    // report is actually called.
-    if (placeholder && state.expectedName) name = state.expectedName;
-
-    state.watch.capturedId = item.id;
-    state.watch.capturedName = name;
-    persistRun();
-    const dir = targetDir();
-    if (!dir) {
-      lastDecisionReason = 'abstained: run folder not known yet (worker restarted mid-run?)';
-      return null;
-    }
-    lastDecisionReason = 'placed at ' + dir + '/' + name;
-    return {
-      filename: `${dir}/${name}`,
-      conflictAction: 'overwrite'
-    };
-  } catch (err) {
-    lastDecisionReason = 'abstained: threw - ' + ((err && err.message) || String(err));
-    return null; // fall through to Chrome's default filename
-  }
-}
-
 /* ------------------------------------------------------------------ *
  * Who else is answering Chrome about downloads.
  *
@@ -693,29 +609,6 @@ function decideDownloadPath(item) {
 const otherDownloaders = new Map();
 
 /**
- * Why the filename listener did what it did, for the last few downloads.
- *
- * WHY THIS EXISTS.
- *
- * On 21 Aug 2026 every report in two consecutive runs landed loose in
- * Downloads. Chrome's own download history settled who was to blame: the
- * page-started files were named by NOBODY - no extension answered at all - and
- * the retry this extension starts itself came out as "download (9).xlsx". So
- * nothing was overriding us. We were declining to answer, and the message
- * shipped to the user blamed a download manager that had not touched it.
- *
- * The sightings list could not show that: it records downloads STARTED BY
- * another extension, and Chrome never says who else answered. What was missing
- * was our own reasoning - decideDownloadPath() has five separate ways to
- * return null and the report could not tell them apart.
- *
- * Recorded synchronously, in memory, capped. Same rules as the sightings: this
- * listener must not do work before it returns.
- */
-const DECISION_LIMIT = 24;
-let filenameDecisions = [];
-
-/**
  * WHEN THIS WORKER STARTED.
  *
  * MV3 stops an idle service worker after about 30 seconds, and everything in
@@ -731,41 +624,6 @@ let filenameDecisions = [];
  */
 const workerStartedAt = Date.now();
 
-/**
- * THE LOG HAS TO OUTLIVE THE WORKER, OR IT IS USELESS EXACTLY WHEN IT MATTERS.
- *
- * v1.17.0 kept these in memory only. The first report after a successful run
- * came back with the section missing entirely - the worker had already been
- * evicted in the two minutes between the run finishing and the button being
- * pressed. An instrument that is wiped by the event it is meant to catch is
- * not an instrument.
- *
- * storage.session survives worker restarts, is cleared when Chrome closes, and
- * never touches disk. The write is SCHEDULED from the listener but runs after
- * it returns: scheduling is synchronous and cheap, and this listener must not
- * do work before returning - that mistake has been made twice already.
- */
-let decisionFlush = null;
-
-function flushDecisions() {
-  decisionFlush = null;
-  chrome.storage.session
-    .set({ filenameDecisions, workerStartedAt })
-    .catch(() => { /* diagnostics must never sink a run */ });
-}
-
-function noteDecision(item, reason) {
-  filenameDecisions.unshift({
-    at: Date.now(),
-    name: (item && item.filename) || '',
-    url: String((item && item.url) || '').slice(0, 80),
-    byExt: (item && item.byExtensionId) || '',
-    reason: reason
-  });
-  if (filenameDecisions.length > DECISION_LIMIT) filenameDecisions.length = DECISION_LIMIT;
-  if (!decisionFlush) decisionFlush = setTimeout(flushDecisions, 0);
-}
-
 function noteOtherDownloader(id, at) {
   if (!id) return;
   const seen = otherDownloaders.get(id) || { id, count: 0, lastAt: 0 };
@@ -774,158 +632,75 @@ function noteOtherDownloader(id, at) {
   otherDownloaders.set(id, seen);
 }
 
-chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
-  // NEVER ANSWER FOR ANOTHER EXTENSION'S DOWNLOAD.
-  //
-  // Chrome asks every extension holding the downloads permission about every
-  // download in the browser. It does not scope the question by site, so "we
-  // only deal with Shopee" is not something Chrome knows or enforces — it is
-  // something this listener has to enforce for itself.
-  //
-  // v1.14.5 tried to, through decideDownloadPath(), and covered only the warm
-  // worker. Two holes were left, and tools/test-filename-listener.js
-  // reproduces both:
-  //
-  //   - Cold worker: the branch at the bottom returns true and then answers
-  //     after hydration, and a blank answer is still an answer. This is not
-  //     the rare case it was assumed to be — this worker is asleep exactly
-  //     while the twin is running, so it was the everyday case.
-  //   - Mid-run: decideDownloadPath() treats any data: URL as our own save and
-  //     handed the twin's zip OUR path and OUR filename.
-  //
-  // byExtensionId comes with the event itself, so this needs no stored state
-  // and is right on a worker woken by this very download. Our own saves carry
-  // our id; downloads started by Shopee's page carry no id at all — both fall
-  // through. Returning without touching suggest() is a true abstention: Chrome
-  // does not count this extension for that download.
-  if (item.byExtensionId && item.byExtensionId !== chrome.runtime.id) {
-    // Wrapped, and nothing else. If this ever threw, the listener would leave
-    // without answering AND without abstaining cleanly, which is the exact
-    // failure mode the guard above exists to prevent. A dropped sighting costs
-    // a line in a diagnostics report; a thrown listener costs the file.
-    try {
-      noteOtherDownloader(item.byExtensionId, Date.now());
-      noteDecision(item, 'abstained: started by another extension');
-    } catch (_) { /* never worth a download */ }
-    return;
+
+/* ------------------------------------------------------------------ *
+ * Writing the file ourselves
+ *
+ * See offscreen/offscreen.js for why the download route was abandoned.
+ *
+ * There is deliberately NO fallback to chrome.downloads here. A file landing
+ * quietly in Downloads under Chrome's own name is the exact failure this
+ * replaced, and a fallback would restore it on the very days it matters.
+ * ------------------------------------------------------------------ */
+let offscreenReady = null;
+
+async function ensureOffscreen() {
+  // createDocument() throws if one already exists and there is no
+  // get-or-create, so asking Chrome what is open is the only race-free way.
+  const existing = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
+  if (existing.length) return;
+
+  if (!offscreenReady) {
+    offscreenReady = chrome.offscreen
+      .createDocument({
+        url: 'offscreen/offscreen.html',
+        // The nearest true reason Chrome offers. There is no "FILE_SYSTEM";
+        // this document exists to turn base64 into bytes on disk.
+        reasons: ['BLOBS'],
+        justification: 'Write report files into the folder the seller chose'
+      })
+      .finally(() => {
+        offscreenReady = null;
+      });
   }
+  await offscreenReady;
+}
 
-  // ANSWER SYNCHRONOUSLY WHENEVER POSSIBLE.
-  //
-  // v1.9.0 made this listener unconditionally async — await hydration, then
-  // suggest. That looked correct and was not. The 10 Aug 19:28 run put every
-  // file in plain Downloads even though the listener matched each one and
-  // captured its download id: an answer that arrives after Chrome has settled
-  // on a filename is the same as no answer at all.
-  //
-  // The SiteGiant twin hid this, because it passes `filename` straight to
-  // downloads.download() and only uses its listener as a backstop. Shopee's
-  // downloads are started by Shopee's own page, so this listener is the only
-  // thing that can place them.
-  //
-  // On a worker that is already awake — which the keep-alive is there to
-  // ensure during a run — hydration has long since settled and everything
-  // needed is in memory, so this is decided before the listener returns.
-  if (hydrated) {
-    const choice = decideDownloadPath(item);
-    try { noteDecision(item, lastDecisionReason); } catch (_) { /* never worth a download */ }
+/** Plain-English wording for each way the folder can be unusable. */
+const FOLDER_TROUBLE = {
+  'no-folder':
+    'No folder has been chosen yet. Open Settings and pick where reports should be saved.',
+  permission:
+    'Chrome needs you to allow the reports folder again. Open Settings and choose the same folder.',
+  error: 'The reports folder could not be written to.'
+};
 
-    // SAY NOTHING when this is not ours. suggest() with no argument is still an
-    // ANSWER, and Chrome gives the final word to the most recently installed
-    // extension that answers — so abstaining politely here overrode the
-    // SiteGiant twin and dropped ITS files into plain Downloads under Chrome's
-    // own names.
-    //
-    // That is what "download (2).zip" always was: not a stranger's download
-    // manager, but these two extensions taking turns. Each release made one the
-    // newest, and the newest silenced the other. Shopee v1.14.4 shipped 14 Aug
-    // and SiteGiant broke on the 15th; SiteGiant v1.11.0 went on on 17 Aug and
-    // this one broke the same afternoon — every report in the run landing loose
-    // in Downloads, which is the giveaway that the folder was never applied.
-    //
-    // Returning without touching suggest() is a true abstention: Chrome does
-    // not count this extension for that download at all.
-    if (!choice) return;
-
-    suggest(choice);
-    return;
-  }
-
-  // The only remaining case: a worker woken by this very event with nothing in
-  // memory yet. Answering late is a gamble on Chrome still listening, but
-  // declining outright loses the file for certain.
-  // Returning true commits us to calling suggest(), so this branch cannot
-  // abstain the clean way. It is the narrow case of a worker woken by this very
-  // event, which the keep-alive makes rare during a run — and a bare suggest()
-  // costs the twin only for that one download, against losing our own name for
-  // certain if we said nothing and Chrome moved on without us.
-  // The cold-worker gamble. If this is what has been happening, it explains
-  // everything at once: Chrome settles on a name before the answer arrives, so
-  // the file is named by nobody and lands loose - which is exactly what its
-  // download history shows.
-  try { noteDecision(item, 'COLD WORKER: answering late, Chrome may already have decided'); } catch (_) {}
-
-  hydrating
-    .then(() => {
-      const choice = decideDownloadPath(item);
-      if (choice) suggest(choice);
-      else suggest();
-    })
-    .catch(() => suggest());
-  return true;
-});
-
-// Backstop: if another extension wins onDeterminingFilename, we still notice
-// that a Shopee download happened.
-//
-// Note what this does NOT say. Capturing a download means "one started and we
-// know its id" — never "it went where we asked". Reading it as the latter is
-// what let a whole run tick green with every file loose in Downloads, so
-// confirmDownload() checks the path Chrome actually used and fetches our own
-// copy when it is the wrong one.
-chrome.downloads.onCreated.addListener(async (item) => {
+/**
+ * Can this run save anything at all?
+ *
+ * Asked BEFORE a run starts, so a run that cannot save never opens ten tabs
+ * and never spends six minutes of Shopee's time producing files with nowhere
+ * to go. The probe checks the permission without creating anything.
+ */
+async function folderReady() {
   try {
-    await hydrating;
-    if (!state.running || state.watch.capturedId != null) return;
-    const url = item.url || '';
-    if (url.startsWith('data:')) return;
-    const haystack = [item.url, item.finalUrl, item.referrer].filter(Boolean).join(' ');
-    if (!SHOPEE_HOST_RE.test(haystack)) return;
-    state.watch.capturedId = item.id;
-    state.watch.capturedName = basename(item.filename) || 'shopee-report';
-    persistRun();
-  } catch (_) {
-    /* ignore */
-  }
-});
-
-async function verifyDownload(id, timeoutMs) {
-  const deadline = Date.now() + (timeoutMs || 120000);
-  for (;;) {
-    let items = [];
-    try {
-      items = await chrome.downloads.search({ id });
-    } catch (_) {
-      items = [];
-    }
-    const item = items[0];
-    if (item) {
-      if (item.state === 'complete') {
-        // The full path, not just the name: where a file landed is the whole
-        // question, and the name alone cannot answer it.
-        return { ok: true, filename: basename(item.filename), path: item.filename };
-      }
-      if (item.state === 'interrupted') {
-        return {
-          ok: false,
-          error: `Chrome could not save the file (${item.error || 'interrupted'}).`
-        };
-      }
-    }
-    if (Date.now() > deadline) {
-      return { ok: false, error: 'The file did not finish downloading in time.' };
-    }
-    await sleep(500);
+    await ensureOffscreen();
+    const reply = await chrome.runtime.sendMessage({
+      target: 'offscreen-writer',
+      probe: true,
+      segments: [],
+      filename: '',
+      base64: ''
+    });
+    if (reply && reply.ok) return { ok: true };
+    const reason = (reply && reply.reason) || 'error';
+    return { ok: false, reason, error: FOLDER_TROUBLE[reason] || FOLDER_TROUBLE.error };
+  } catch (e) {
+    return {
+      ok: false,
+      reason: 'error',
+      error: 'The reports folder could not be opened: ' + ((e && e.message) || e)
+    };
   }
 }
 
@@ -937,110 +712,52 @@ async function saveFile(dataUrl, filename) {
 
   // Wait for the run folder rather than guessing at it.
   //
-  // Unlike the filename listener, this runs inside the run's own async flow, so
-  // it is free to wait - and hydration is the difference between a real path
-  // and "Shopee daily report//name", which Chrome silently replaces with
-  // "download.xlsx". Waiting costs a moment; guessing cost a whole run.
-  if (!targetDir()) await hydrating;
+  // This runs inside the run's own async flow, so it is free to wait - and
+  // hydration is the difference between a real path and one with an empty
+  // segment in it. Waiting costs a moment; guessing cost a whole run.
+  if (!folderSegments()) await hydrating;
 
-  const dir = targetDir();
-  if (!dir) {
+  const segments = folderSegments();
+  if (!segments) {
     return {
       ok: false,
       error: `Cannot save "${name}": this run's folder is not known. ` +
         'Chrome most likely restarted the extension mid-run. Run the report again.'
     };
   }
-  const path = `${dir}/${name}`;
 
-  let id;
+  const comma = dataUrl.indexOf(',');
+  const base64 = comma === -1 ? '' : dataUrl.slice(comma + 1);
+  if (!base64) {
+    return { ok: false, error: `Nothing to save — "${name}" had no content.` };
+  }
+
   try {
-    // Also published for our onDeterminingFilename listener to re-assert, in
-    // case another extension overrides the filename we ask for here.
-    state.pendingSavePath = path;
-    await persistRun();
-    id = await chrome.downloads.download({
-      url: dataUrl,
-      filename: path,
-      conflictAction: 'overwrite',
-      saveAs: false
+    await ensureOffscreen();
+    const reply = await chrome.runtime.sendMessage({
+      target: 'offscreen-writer',
+      segments,
+      filename: name,
+      base64
     });
-  } catch (e) {
-    state.pendingSavePath = '';
-    persistRun();
+
+    if (reply && reply.ok) {
+      // Nothing to verify. The bytes are on disk under this exact name because
+      // we put them there - no download id, no arbitration, no second-guessing
+      // where Chrome decided to file it.
+      state.lastSavedPath = reply.path;
+      persist();
+      return { ok: true, filename: name, path: reply.path };
+    }
+
+    const reason = (reply && reply.reason) || 'error';
     return {
       ok: false,
-      error: `Chrome refused to save "${name}": ${e && e.message ? e.message : e}`
+      error: `Could not save "${name}". ${FOLDER_TROUBLE[reason] || FOLDER_TROUBLE.error}`
     };
-  } finally {
-    // Cleared after a beat: the event fires just after download() resolves.
-    setTimeout(() => {
-      state.pendingSavePath = '';
-      persistRun();
-    }, 5000);
+  } catch (e) {
+    return { ok: false, error: `Could not save "${name}": ${(e && e.message) || e}` };
   }
-
-  const verified = await verifyDownload(id, 120000);
-  if (!verified.ok) return { ok: false, error: verified.error };
-
-  // If Chrome saved it under a different name, something overrode us — but ask
-  // the disk before saying so.
-  //
-  // Ads reports produce TWO downloads: Shopee's page starts its own, which
-  // Chrome names "download.csv", and we save the captured blob under the real
-  // name. When the id verified here is Shopee's rather than ours, the names
-  // differ and this reported a failure against a file that had in fact arrived
-  // correctly — every GMV Max run came back 9/10 with the right file sitting in
-  // the folder. Checked against Chrome's own download record on 14 Aug 2026:
-  // it attributes "Shop+GMV+MAX-Detail-Data-….csv" to this extension, and no
-  // "download.csv" exists anywhere.
-  //
-  // So a name mismatch is only a failure if OUR name never landed. Searching by
-  // name rather than by id also survives the reverse case — our download being
-  // the one that got overridden — because then nothing matches and we still say
-  // so.
-  if (verified.filename && verified.filename !== name) {
-    let landed = [];
-    try {
-      landed = await chrome.downloads.search({
-        // Anchored to the end: the stored path is absolute, and a bare name
-        // would also match a same-named file in some other folder.
-        filenameRegex: `${escapeRegex(name)}$`,
-        exists: true,
-        limit: 1
-      });
-    } catch (_) {
-      landed = [];
-    }
-
-    if (!landed.length) {
-      return {
-        ok: false,
-        error:
-          `Chrome saved the file as "${verified.filename}" instead of "${name}". ` +
-          // Do NOT name a culprit here. On 21 Aug 2026 this message blamed a
-          // download manager while Chrome's own history showed no other
-          // extension had touched the file - this extension had simply
-          // declined to answer. A confident wrong cause is worse than none.
-          `Something stopped the file being placed. Open this extension's Options page and click Copy diagnostics - it now records why the file was not placed, which is the only way to tell.`
-      };
-    }
-
-    if (misplaced(landed[0].filename)) {
-      return { ok: false, error: strayMessage(name, landed[0].filename) };
-    }
-
-    return { ok: true, filename: name, id: landed[0].id };
-  }
-
-  // The name we asked for is the name on disk — but a name says nothing about
-  // a folder, and the folder is the part another extension takes away.
-  if (misplaced(verified.path)) {
-    return { ok: false, error: strayMessage(name, verified.path) };
-  }
-
-  state.lastDownloadId = id; // so the popup can reveal the folder afterwards
-  return { ok: true, filename: verified.filename || name, id };
 }
 
 /* ==================================================================== *
@@ -1441,212 +1158,29 @@ async function runFurious(selected) {
 }
 
 /**
- * Is this path inside the run folder?
+ * A page-initiated download is only real once the file is in our hands.
  *
- * The folder we ask for is only ever a SUGGESTION. Chrome asks every extension
- * holding the downloads permission where a file should go and gives the last
- * word to the most recently installed one that answers, so "the download
- * finished" has never meant "the download finished where we put it".
+ * WHAT USED TO BE HERE.
  *
- * Nothing checked. The onCreated backstop below marks a download captured the
- * moment a Shopee download starts — whether or not our folder was applied —
- * and confirmDownload() took that as proof and ticked the report. The 20 Aug
- * run reported 9/10 with every file sitting loose in Downloads under Shopee's
- * own names, which is precisely what that looks like from the outside.
+ * Six functions that all existed to answer one question: did Chrome put the
+ * file where we asked? landedInRunFolder(), misplaced(), findRunDownload(),
+ * strayMessage(), rescueStray(), revealFolder(). They are gone, because the
+ * question is gone - we write the file ourselves and know exactly where it is.
  *
- * Compared segment by segment: a folder name must be a folder on the path, not
- * a substring of some longer name that happens to contain it.
- */
-function landedInRunFolder(path) {
-  const folder = state.runFolder || state.folder;
-  if (!folder || !path) return false;
-  return String(path).split(/[\\/]/).includes(folder);
-}
-
-/**
- * Did this file end up somewhere we did not ask for?
- *
- * Distinct from `!landedInRunFolder()`, which is also false when there is no
- * run folder to compare against. With no folder in mind nothing can be
- * misplaced, and a save outside a run must not be failed for it.
- */
-function misplaced(path) {
-  return Boolean(state.folder) && !landedInRunFolder(path);
-}
-
-/**
- * Did this file actually land in the run folder?
- *
- * Used when the download watcher captured nothing. Our onDeterminingFilename
- * listener is what places a page-started download into the dated folder, so
- * if it never fired, the file is not where we say it is — but it may still
- * exist somewhere, and Chrome's own record is the way to find out.
- */
-async function findRunDownload(expected) {
-  const folder = state.runFolder || state.folder;
-  if (!folder) return null;
-
-  // Loose comparison on purpose. Shopee displays a name with slashes in it
-  // ("...-12/08/2026-...csv") that reaches disk with underscores, so an exact
-  // match would call a perfectly good file missing.
-  const loose = (s) => basename(s || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
-
-  try {
-    const items = await chrome.downloads.search({
-      limit: 40,
-      orderBy: ['-startTime']
-    });
-    const wanted = loose(expected);
-    const since = (state.startedAt || Date.now()) - 60000;
-    const inFolder = items.filter((item) => {
-      if (item.state !== 'complete' || item.exists === false) return false;
-      if (new Date(item.startTime).getTime() < since) return false;
-      return landedInRunFolder(item.filename);
-    });
-
-    // Prefer the file we were expecting; otherwise take the newest thing this
-    // run put in the folder. Landing under a name we did not predict is worth
-    // reporting as a success — the file is there — and the run folder is
-    // ours alone, so nothing else can be in it.
-    return inFolder.find((item) => wanted && loose(item.filename) === wanted) ||
-      inFolder[0] ||
-      null;
-  } catch (_) {
-    return null;
-  }
-}
-
-/**
- * What to say when a file exists but not where it belongs.
- *
- * Names the path Chrome actually used, because the file IS there and the seller
- * can go and get it — "the download failed" would be both wrong and unhelpful.
- */
-function strayMessage(name, path, extra) {
-  return (
-    `Chrome saved "${name}" to ${path || 'your Downloads folder'} instead of ` +
-    `${targetDir() || "this run's folder"}.${extra ? ` ${extra}` : ''} ` +
-    'Open the Options page and click Copy diagnostics - it now records why the file was not placed, which is the only way to tell. ' +
-    'then run this report again.'
-  );
-}
-
-/**
- * Fetch our own copy of a file that landed outside the run folder.
- *
- * Losing the placement is not the same as losing the file. Shopee's response is
- * still in the content script's captures, so it can be saved a second time
- * through downloads.download() with the path attached — the way the SiteGiant
- * twin has always worked, and the way that does not depend on winning Chrome's
- * arbitration. The stray copy is left where Chrome put it: it is a file the
- * seller can see, and deleting downloads is not this extension's business.
- */
-async function rescueStray(verified, ctx) {
-  if (!ctx || ctx.tabId == null) {
-    throw new AppError(
-      strayMessage(
-        verified.filename,
-        verified.path,
-        'The tab it came from is gone, so no second copy could be fetched.'
-      )
-    );
-  }
-
-  let rescued = null;
-  try {
-    rescued = await sendToContent(ctx.tabId, {
-      type: 'rescueExport',
-      // The stray carries Shopee's own name, which beats anything we could
-      // reconstruct — so hand it back as the name to save under.
-      params: { ...(ctx.params || {}), preferredName: verified.filename }
-    });
-  } catch (_) {
-    rescued = null;
-  }
-
-  if (!rescued || !rescued.ok || !rescued.filename) {
-    throw new AppError(
-      strayMessage(
-        verified.filename,
-        verified.path,
-        'The file could not be fetched a second time to put a copy there.'
-      )
-    );
-  }
-
-  return { name: rescued.filename, strayPath: verified.path };
-}
-
-/**
- * A page-initiated download is only real once Chrome has finished writing it —
- * and only ours once it is in the run folder.
- *
- * The no-capture case used to fall through to `return res.filename` — the name
- * the content script EXPECTED — so a report could be ticked for a file nobody
- * had seen arrive. The capture case was no better: onCreated marks a download
- * captured whether or not our folder was applied, so a whole run could tick
- * green with every file loose in Downloads. Both now have to show the file in
- * the folder.
+ * `via: 'browser'` now means the content script could not get the bytes and
+ * Chrome took the file instead. That is a failure, not a success: a file in
+ * Downloads under a name Chrome chose is precisely what this release exists to
+ * stop. Say so plainly rather than ticking the report green.
  */
 async function confirmDownload(res, ctx) {
   if (res.via !== 'browser') return { name: res.filename };
 
-  if (state.watch.capturedId != null) {
-    const verified = await verifyDownload(state.watch.capturedId, 120000);
-    if (!verified.ok) throw new AppError(verified.error);
-
-    if (!misplaced(verified.path)) {
-      state.lastDownloadId = state.watch.capturedId;
-      return { name: verified.filename || res.filename };
-    }
-
-    return rescueStray(verified, ctx);
-  }
-
-  const landed = await findRunDownload(res.filename);
-  if (landed) {
-    state.lastDownloadId = landed.id;
-    return { name: basename(landed.filename) || res.filename };
-  }
-
   throw new AppError(
-    `Shopee started the download for "${res.filename || 'this report'}" but it ` +
-      `never arrived in ${targetDir() || "this run's folder"}. ` +
-      'Open the Options page and click Copy diagnostics - it now records why the file was not placed, which is the only way to tell. Then run ' +
-      'this report again.'
+    `Chrome downloaded "${res.filename || 'this report'}" itself before we could ` +
+      'save it, so it went to your Downloads folder instead of your reports folder. ' +
+      'Run this report again. If it keeps happening, open the Options page and click ' +
+      'Copy diagnostics.'
   );
-}
-
-/**
- * Reveal the dated folder in the file manager.
- *
- * chrome.downloads.show() opens the folder with the file selected, which is
- * how we get to "Shopee daily report/<date>/" rather than plain Downloads.
- */
-async function revealFolder(downloadId) {
-  const candidates = [];
-  if (downloadId != null) candidates.push(downloadId);
-  if (state.lastDownloadId != null) candidates.push(state.lastDownloadId);
-  const stored = await chrome.storage.local.get('lastRun');
-  if (stored.lastRun && stored.lastRun.downloadId != null) {
-    candidates.push(stored.lastRun.downloadId);
-  }
-
-  for (const id of candidates) {
-    try {
-      const [item] = await chrome.downloads.search({ id });
-      // A file the user has since deleted or moved cannot be revealed.
-      if (item && item.exists !== false && item.state === 'complete') {
-        chrome.downloads.show(id);
-        return { ok: true, revealed: 'file' };
-      }
-    } catch (_) {
-      /* try the next candidate */
-    }
-  }
-
-  chrome.downloads.showDefaultFolder();
-  return { ok: true, revealed: 'downloads' };
 }
 
 async function runExports(ids, mode) {
@@ -1654,6 +1188,12 @@ async function runExports(ids, mode) {
 
   const selected = EXPORTS.filter((ex) => ids.includes(ex.id));
   if (!selected.length) return { ok: false, error: 'Nothing selected.' };
+
+  // A run that cannot save must never start. Ten tabs, six minutes of Shopee's
+  // time and nowhere to put the results is worse than a clear refusal - and
+  // there is no fallback to Downloads any more to quietly absorb it.
+  const folder = await folderReady();
+  if (!folder.ok) return { ok: false, error: folder.error };
 
   state.running = true;
   state.cancel = false;
@@ -1671,6 +1211,9 @@ async function runExports(ids, mode) {
   state.runFolder = runFolder(day, startedAt);
   state.results = blankResults(ids);
   state.orderLog = [];
+  // A stray from yesterday must not be reported against today.
+  state.strays = [];
+  state.lastSavedPath = '';
   state.tabIds = [];
   state.tabId = null;
   persist();
@@ -1763,6 +1306,12 @@ async function runExports(ids, mode) {
 
   await recordHistory(selected);
 
+  // The pin covered THIS run and nothing after it. Left set, it silently files
+  // every later run under an old date - which is what happened on 23 Aug 2026,
+  // when a pin set to catch up on Saturday sent Sunday's run there too.
+  await chrome.storage.local.remove('realtimeDate');
+  state.realtimeDate = '';
+
   const total = selected.length;
   await chrome.storage.local.set({
     lastRun: {
@@ -1773,7 +1322,8 @@ async function runExports(ids, mode) {
       folder: state.folder,
       runFolder: state.runFolder,
       error: state.error,
-      downloadId: state.lastDownloadId,
+      path: state.lastSavedPath,
+      strays: state.strays.slice(),
       results: state.results
     }
   });
@@ -1906,10 +1456,16 @@ async function handle(msg, sender) {
       const realtimeDate = await getRealtimeDate();
       const spans = exportDates(new Date(), realtimeDate);
       const dupes = duplicateExports(EXPORTS.map((e) => e.id), realtimeDate);
+      // The popup asks this every time it opens, so it can refuse to offer a
+      // run it knows cannot save.
+      const ready = await folderReady();
+      const now = new Date();
       return {
         ok: true,
         realtimeDate,
-        folder: dateFolder(reportDay(new Date(), realtimeDate)),
+        folderReady: ready.ok,
+        folderTrouble: ready.ok ? '' : ready.error,
+        folder: `${ROOT_FOLDER}/${runFolder(reportDay(now, realtimeDate), now)}`,
         exports: EXPORTS.map((e) => ({
           id: e.id,
           name: e.name,
@@ -1942,15 +1498,15 @@ async function handle(msg, sender) {
           },
           browser: navigator.userAgent,
           platform: (navigator.userAgentData && navigator.userAgentData.platform) || '',
-          // null, not false: this extension has never had a reports-folder
-          // option, and reporting "no" sends the reader looking for a setting
-          // that does not exist. The SiteGiant twin does have one.
-          folder: { chosen: null, extensionFolderGranted: msg.extensionFolderGranted === true },
+          folder: {
+            chosen: msg.reportsFolder === true,
+            name: msg.reportsFolderName || '',
+            extensionFolderGranted: msg.extensionFolderGranted === true
+          },
           updateSource: stored.updateSource || null,
           updateInfo: stored.updateCache || null,
           otherExtensions: Array.from(otherDownloaders.values())
             .sort((a, b) => b.lastAt - a.lastAt),
-          decisions: filenameDecisions,
           workerStartedAt,
           history: stored.history || [],
           historyLimit: 5
@@ -1975,9 +1531,6 @@ async function handle(msg, sender) {
     case 'openOptions':
       chrome.runtime.openOptionsPage();
       return { ok: true };
-
-    case 'openFolder':
-      return revealFolder(msg.downloadId);
 
     case 'getState': {
       const stored = await chrome.storage.local.get('lastRun');
@@ -2042,6 +1595,16 @@ async function handle(msg, sender) {
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Addressed to the offscreen writer, not to us. sendMessage() reaches every
+  // context in the extension, including this one, and whichever answers first
+  // wins. Without this the worker could reply "unknown command" while the file
+  // was being written perfectly well a few lines away.
+  //
+  // The `!msg.type` check below happens to cover today's writer messages, which
+  // carry `target` and no `type`. That is luck, not a guard: add a `type` to
+  // one of them and it breaks silently.
+  if (msg && msg.target === 'offscreen-writer') return undefined;
+
   if (!msg || !msg.type) return false;
   handle(msg, sender).then(
     (res) => sendResponse(res),

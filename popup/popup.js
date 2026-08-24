@@ -26,7 +26,8 @@ const el = {
   updateBar: document.getElementById('update-bar'),
   updateText: document.getElementById('update-text'),
   updateAction: document.getElementById('update-action'),
-  openFolder: document.getElementById('open-folder'),
+  settings: document.getElementById('settings'),
+  where: document.getElementById('where'),
   realtimeDate: document.getElementById('realtime-date'),
   realtimeClear: document.getElementById('realtime-clear'),
   realtimeHint: document.getElementById('realtime-hint'),
@@ -37,6 +38,8 @@ const el = {
 };
 
 let exportDefs = [];
+/** True when no reports folder is set, so nothing may be started. */
+let noFolder = false;
 // The folder a run would save into right now — named for the pinned date.
 let targetFolder = '';
 
@@ -259,25 +262,47 @@ function render(runState, lastRun) {
   const running = !!(runState && runState.running);
 
   setButton(el.runFurious, running);
+  // render() runs after loadExports() and on every state change, so the folder
+  // gate has to be re-applied here or it is silently undone a moment later.
+  if (noFolder) el.runFurious.disabled = true;
   el.cancel.hidden = !running;
   for (const button of el.picker.querySelectorAll('button')) {
-    button.disabled = running;
+    button.disabled = running || noFolder;
   }
 
   buildRows(runState && runState.results);
 
-  if (runState && runState.error && !running) showBanner(runState.error);
+  if (noFolder) {
+    // Leave the folder warning standing. It is the one thing that has to be
+    // read before anything else in this popup means anything.
+  } else if (runState && runState.error && !running) showBanner(runState.error);
   else showBanner('');
 
   if (lastRun) {
     const mark = lastRun.done === lastRun.total ? '✓' : '✗';
-    // Show the run's own sub-folder — that is where the files actually are.
-    const where = lastRun.runFolder || lastRun.folder;
     el.lastRun.textContent = `Last run: ${lastRun.done}/${lastRun.total} ${mark} (${formatWhen(
       lastRun.at
-    )})${where ? ' → ' + where : ''}`;
+    )})`;
+    // The full path, not just a folder name. There is no API that opens a
+    // folder chosen through the directory picker, so showing where the files
+    // are is the honest replacement for a button that could jump to them.
+    const where = lastRun.path
+      ? lastRun.path.split('/').slice(0, -1).join('/')
+      : lastRun.runFolder || '';
+    el.where.textContent = where ? `Saved in ${where}` : '';
+
+    // Chrome's own copies of reports we saved properly. Worth mentioning so
+    // nobody assumes the run misfired, and worth being clear they are spares.
+    if (lastRun.strays && lastRun.strays.length) {
+      const n = lastRun.strays.length;
+      showBanner(
+        `Chrome also left ${n} spare cop${n === 1 ? 'y' : 'ies'} in your Downloads folder. ` +
+          'Your reports are safe in the folder above — those are duplicates you can delete.'
+      );
+    }
   } else {
     el.lastRun.textContent = 'No runs yet.';
+    el.where.textContent = '';
   }
 }
 
@@ -296,16 +321,9 @@ async function start(ids) {
 
 const allIds = () => exportDefs.map((d) => d.id);
 el.runFurious.addEventListener('click', () => start(allIds()));
-// Opens the file manager at the dated folder, via the last saved file.
-el.openFolder.addEventListener('click', async () => {
-  el.openFolder.disabled = true;
-  const res = await send({ type: 'openFolder' });
-  if (res && res.revealed === 'downloads') {
-    showBanner('No downloaded file to jump to yet — opened your Downloads folder.');
-  }
-  setTimeout(() => {
-    el.openFolder.disabled = false;
-  }, 500);
+el.settings.addEventListener('click', async () => {
+  await send({ type: 'openOptions' });
+  window.close();
 });
 
 el.cancel.addEventListener('click', async () => {
@@ -403,7 +421,8 @@ function renderRealtime(value) {
       `Same day as #${twin.id} ${twin.name} — #${clash.id} will be skipped, ` +
       `you get one file for both. Saving to ${targetFolder}.`;
   } else if (value) {
-    el.realtimeHint.textContent = `Saving to ${targetFolder}, not today's folder.`;
+    el.realtimeHint.textContent =
+      `Saving to ${targetFolder}, not today's folder. Back to today after this run.`;
   } else {
     el.realtimeHint.textContent =
       'Leave empty for today. Pick an earlier day if you missed last night.';
@@ -420,6 +439,19 @@ async function loadExports() {
   el.realtimeDate.max = yesterday.toISOString().slice(0, 10);
   renderRealtime(res && res.realtimeDate);
   buildPicker();
+
+  // NO FOLDER, NO RUN.
+  //
+  // There is no fallback to the Downloads folder any more, so a run started
+  // now would spend six minutes fetching reports it cannot save. Better to say
+  // so before the click than to explain it ten failures later. Done after
+  // buildPicker(), which creates the buttons being disabled here.
+  noFolder = res ? res.folderReady === false : false;
+  if (noFolder) {
+    showBanner(res.folderTrouble || 'No folder chosen for reports yet.');
+    el.runFurious.disabled = true;
+    for (const button of el.picker.querySelectorAll('button')) button.disabled = true;
+  }
 }
 
 async function setRealtimeDate(value) {

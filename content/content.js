@@ -957,21 +957,6 @@
   }
 
   /**
-   * Write our own copy of a report Chrome filed somewhere else.
-   *
-   * Called by the background when a browser download completed outside the run
-   * folder. Nothing is triggered again — the captures from the collect that has
-   * just run are still here, and re-clicking would ask Shopee for a second
-   * export it may well refuse.
-   */
-  async function rescueExport(o) {
-    report('Chrome filed that elsewhere — saving our own copy…');
-    const saved = await saveFromCaptures(o);
-    if (!saved) throw new AppError(ERR.NO_BLOB);
-    return { ok: true, filename: saved.filename, via: saved.via };
-  }
-
-  /**
    * Trigger a download and capture the file, whichever way Shopee delivers it.
    *
    *   1. Shopee's own browser download  -> the background rewrites its path
@@ -991,21 +976,40 @@
     await wait(o.settleMs == null ? 5000 : o.settleMs);
 
     const extraRounds = o.extraRounds == null ? 8 : o.extraRounds;
+    let chromeTookIt = false;
+
     for (let i = 0; i <= extraRounds; i++) {
       checkCancel();
 
-      const watch = await bg({ type: 'checkDownload' });
-      if (watch && watch.captured) {
-        return { filename: watch.filename, via: 'browser' };
-      }
-
+      // CAPTURED BYTES FIRST.
+      //
+      // This used to ask the background whether Chrome had started its own
+      // download, and return the moment it had. That was right while the
+      // background rewrote the download's path. It is wrong now: a file Chrome
+      // has taken is a file we cannot place, and the whole point of this
+      // release is that we place every file ourselves.
       const saved = await saveFromCaptures(o);
       if (saved) return saved;
+
+      const watch = await bg({ type: 'checkDownload' });
+      if (watch && watch.captured && !chromeTookIt) {
+        chromeTookIt = true;
+        // Keep waiting: the blob usually arrives a beat after the download
+        // starts, and having both is fine — the stray gets reported.
+        report('Chrome started its own download — waiting for the file itself…');
+      }
 
       if (i < extraRounds) {
         report(`Waiting for the file… ${(i + 1) * 2}s`);
         await wait(2000);
       }
+    }
+
+    // Nothing captured in the whole window. If Chrome took it, say so in the
+    // terms the background can turn into a useful message.
+    if (chromeTookIt) {
+      const watch = await bg({ type: 'checkDownload' });
+      return { filename: (watch && watch.filename) || o.preferredName || '', via: 'browser' };
     }
 
     throw new AppError(ERR.NO_BLOB);
@@ -1881,18 +1885,6 @@
         startHeartbeat();
         try {
           return { ok: true, ...(await checkLogin()) };
-        } finally {
-          stopHeartbeat();
-        }
-      }
-
-      // The browser download landed outside the run folder. Save our own copy
-      // from what was already captured, without asking Shopee for a new export.
-      case 'rescueExport': {
-        cancelled = false;
-        startHeartbeat();
-        try {
-          return await rescueExport(msg.params || {});
         } finally {
           stopHeartbeat();
         }

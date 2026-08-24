@@ -3,56 +3,62 @@
 Chrome MV3 extension. Downloads the 7 daily Shopee Seller Centre reports into
 dated folders. Plain JavaScript, no build step, no dependencies.
 
-## The rule that has broken twice
+## There is no filename listener, and there must not be one
 
-`chrome.downloads.onDeterminingFilename` is **browser-wide**. Chrome asks every
-extension holding the `downloads` permission about every download in the
-browser — it does not scope the question by site. "We only deal with Shopee" is
-not something Chrome knows; it is something this listener has to enforce for
-itself, on the first line.
+Reports are written straight into a folder the seller picks, through a
+`FileSystemDirectoryHandle` held by `offscreen/offscreen.js`. Chrome's download
+machinery is not involved, so no other extension is consulted about the name.
 
-**`suggest()` with no arguments is not silence.** Chrome's docs: a listener may
-call it "in order to allow the download to use `downloadItem.filename`" — which
-is Chrome's own guess from the URL. Answering blank about a sibling's download
-throws away the path that sibling asked for and requests Chrome's guess instead:
-`download.zip`, then `download (1).zip`, loose in Downloads with no folder.
+**Do not add `chrome.downloads.onDeterminingFilename` back.** There was one for
+months and it is the code with the worst history in this repo. It lost anyway.
+On 23 Aug 2026 it answered Chrome synchronously, on a warm worker, with the
+correct path — its own log records `placed at Shopee daily report/…` for five
+consecutive reports — and Chrome filed every one of them in plain Downloads
+under a name of its own. The retry lost too: `downloads.download()` was called
+with the full path attached and produced `download (4).csv`.
 
-Only a plain `return`, without touching `suggest()`, is a true abstention.
+That listener is browser-wide, and Chrome gives the final word to the most
+recently installed extension that answers. The winner therefore changes
+whenever anything else on the machine updates itself, which is why the same
+code failed on one PC and not another, and why each fix appeared to work for a
+week. Through August 2026 this extension and the SiteGiant twin silenced each
+other in turn. Never explain that away as the machine.
 
-So:
+The listener also cost other tools their downloads: its last log before removal
+caught it answering late on two zips belonging to a neighbouring extension.
 
-- **First line of the listener:**
-  `if (item.byExtensionId && item.byExtensionId !== chrome.runtime.id) return;`
-  Note the shape. Our own saves carry our id; **downloads started by Shopee's own
-  page carry no id at all**, and those must fall through — this listener is the
-  only thing that can place them. `byExtensionId` arrives with the event, so
-  this is correct even on a worker woken by that very download.
-- **Answer synchronously whenever possible.** An answer that arrives after
-  Chrome has settled on a filename is the same as no answer. The 10 Aug 2026 run
-  put every file in plain Downloads while the listener matched each one — it had
-  awaited hydration first. The keep-alive exists so the worker is awake during a
-  run and everything needed is already in memory.
-- The one branch that may still `return true` is a worker woken by this very
-  event with nothing in memory. It is a gamble, deliberately taken, and the top
-  guard means it can only ever cost a Shopee page download — never a sibling's.
+What is left is `downloads.onCreated`, and it only watches. A Shopee download
+appearing during a run is a **stray** — Chrome's own copy of a report we are
+also saving properly. It is reported and never deleted: removing a seller's
+files is not this extension's business, and a wrong deletion cannot be undone.
 
-Sibling extensions on the same machine — SiteGiant Downloader, Shopee Review
-Media Extractor — obey the same rule from their side. Through August 2026 these
-two silenced each other, each release making one of them the most recently
-installed and therefore the winner, which is why the same code failed on one PC
-and not another. Never explain that away as the machine.
+`onCreated` also still feeds `noteOtherDownloader()`, so the diagnostics can go
+on saying which other extensions are starting downloads. That is a fact worth
+keeping — it is the one the August 2026 filename hunt lacked.
 
-`tools/test-filename-listener.js` boots `background.js` against a stub `chrome`
-and fires the listener; a delayed `storage.session.get` reproduces a cold
-worker. Run it before and after touching this code.
+## No fallback to the Downloads folder
 
-## Do not trust the download id alone
+If no folder is chosen, or its permission has lapsed, `runExports()` refuses to
+start and says so. It does not fall back.
 
-Ads reports produce **two** downloads: Shopee's page starts its own, which Chrome
-names `download.csv`, and this extension saves the captured blob under the real
-name. Verifying whichever id happened to be held reported a good run as 9/10.
-Since v1.15.0 the check looks on disk for where the file actually landed, and
-fetches it again if it is not there. `tools/test-placement.js` covers this.
+That is deliberate and it was Anson's call. A fallback would restore the exact
+failure this replaced — a file landing quietly somewhere he did not ask for —
+and it would do it on the days things are already going wrong, which are the
+days he is least likely to notice. A run that refuses is recoverable in one
+click; a file in the wrong place is not noticed for a week.
+
+The consequence: `via: 'browser'` is now a **failure**. It means the content
+script never got the bytes and Chrome took the file instead. Say so; never tick
+a report green because a file exists somewhere.
+
+## The Real Time pin lasts one run
+
+Pinning Real Time to an earlier day files the whole run under that day. The pin
+is cleared when the run ends, whatever the outcome.
+
+It used to persist. Set on 23 Aug 2026 to catch up on Saturday, it was still
+set on Sunday, and Sunday's run went into Saturday's folder while the popup
+warned in small red text that nobody read.
 
 ## When someone reports a problem
 
@@ -119,6 +125,7 @@ Every one of them runs in CI on every push (`.github/workflows/tests.yml`), and
 each was written after a bug that had already shipped. Run them before pushing
 anyway — CI tells you after the fact, and the machines poll this branch.
 
-If you are about to change how downloads are named or where files land, run the
-filename tests first, and again after. That is the code with the worst history
-in this repo.
+If you are about to change where files land, run `tools/test-folder-writer.js`
+first and again after. `tools/test-filename-listener.js`, `tools/test-placement.js`
+and `tools/boot-worker.js` were deleted in v1.19.0 along with the code they
+covered — a test left passing against nothing is worse than no test.
