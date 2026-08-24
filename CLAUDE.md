@@ -60,6 +60,35 @@ It used to persist. Set on 23 Aug 2026 to catch up on Saturday, it was still
 set on Sunday, and Sunday's run went into Saturday's folder while the popup
 warned in small red text that nobody read.
 
+## Three operating systems, one result
+
+These reports are fetched on Windows, macOS and Linux, and Anson's requirement
+is that all three produce the same files. Anything that could differ per OS has
+to be pinned deliberately, because the defaults do not agree.
+
+- **Filenames.** `lib/safe-name.js` holds one rule, and it is the STRICTEST of
+  the three applied on all three. The old download route got this for free —
+  Chrome sanitised names itself — but `getFileHandle()` takes the name as given
+  and throws on whatever the platform rejects. A name legal on Linux and not on
+  Windows would produce a file on one machine and an error on another. Being
+  needlessly strict on Linux costs nothing; being lenient costs the guarantee.
+  The rule is idempotent because the name passes through it twice, and it is
+  applied at the disk boundary in `offscreen.js`, not only at the source.
+- **Day names** are `toLocaleDateString('en-US')`, so a folder is
+  `24082026-Monday` and never `24082026-Montag`.
+- **Windows path length** is why names are capped at 120 characters. A
+  directory handle never reveals how deep it sits, so the name is the only part
+  we can bound.
+
+What CANNOT be made identical, and is not a bug:
+
+- The **Open folder** window is the OS's own dialog, so it looks different on
+  each. It lands in the same place.
+- **Timezone is a machine setting, not an OS one.** Date folders and the Orders
+  ranges come from the local clock, so a machine set to a different timezone
+  fetches a different day. If that ever bites, pinning to Asia/Kuala_Lumpur is
+  the fix — but it is a behaviour change and Anson's call, not a silent one.
+
 ## When someone reports a problem
 
 **Ask for the diagnostics paste before guessing.** Options -> Copy diagnostics

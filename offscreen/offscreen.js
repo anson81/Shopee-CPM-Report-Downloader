@@ -121,7 +121,15 @@ async function write({ segments, filename, base64, probe }) {
     /* the button falls back to the chosen root */
   }
 
-  const handle = await dir.getFileHandle(filename, { create: true });
+  // Applied again here, at the only place that touches disk.
+  //
+  // The content script already sanitises and the rule is idempotent, so this
+  // normally changes nothing. It is here because THIS is the call that fails:
+  // getFileHandle() takes the name as given and throws on whatever the OS
+  // rejects, so a name reaching this line unchecked would work on Linux and
+  // fail on Windows. Defence at the boundary, not only at the source.
+  const safeName = self.SRD_safeFileName(filename);
+  const handle = await dir.getFileHandle(safeName, { create: true });
   const writable = await handle.createWritable();
   try {
     await writable.write(bytesFromBase64(base64));
@@ -131,7 +139,7 @@ async function write({ segments, filename, base64, probe }) {
     await writable.close();
   }
 
-  return { ok: true, path: `${(segments || []).filter(Boolean).join('/')}/${filename}` };
+  return { ok: true, path: `${(segments || []).filter(Boolean).join('/')}/${safeName}` };
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {

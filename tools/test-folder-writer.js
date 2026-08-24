@@ -111,6 +111,14 @@ function boot({ root = undefined, saved = {} } = {}) {
     }
   };
   vm.createContext(sandbox);
+  // offscreen.html loads lib/safe-name.js ahead of offscreen.js, and the writer
+  // calls self.SRD_safeFileName at the disk boundary. Booting without it would
+  // test a document that does not exist.
+  sandbox.self = sandbox;
+  vm.runInContext(
+    fs.readFileSync(path.join(__dirname, '..', 'lib', 'safe-name.js'), 'utf8'),
+    sandbox
+  );
   vm.runInContext(source, sandbox);
   return {
     listener: () => listener,
@@ -248,4 +256,18 @@ test('a probe does not overwrite the remembered folder', async () => {
   // The popup probes on every open. If that reset the memory, Open folder
   // would drift back to the root the first time the popup was looked at.
   assert.strictEqual(saved.lastRunFolder.name, 'from-an-earlier-run');
+});
+
+test('an unsafe name is made safe at the disk boundary', async () => {
+  const log = [];
+  const { send } = boot({ root: fakeDir(log, 'Documents') });
+  // Nothing sanitised this on the way in. getFileHandle() would throw on the
+  // slash on every OS, and keep the colon on Linux while failing on Windows.
+  const reply = await send({ ...MSG, filename: 'a/b/re:port.csv' });
+
+  assert.strictEqual(reply.ok, true);
+  assert.ok(log.includes('file:report.csv:create'), log.join(', '));
+  // The reported path must name the file that actually landed, not the one we
+  // were asked for - otherwise the popup points at a file that is not there.
+  assert.ok(reply.path.endsWith('/report.csv'), reply.path);
 });

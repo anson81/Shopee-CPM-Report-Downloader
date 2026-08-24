@@ -1,8 +1,9 @@
 {
-    "version": "1.19.1",
+    "version": "1.20.0",
     "notes": [
         "Adds an 'Open folder' button beside Settings in the popup. It opens a folder window straight at the run you just downloaded - for example 'Shopee daily report/24082026-Monday-0915' - so you do not have to go looking for it.",
-        "One honest limit: Chrome does not let an extension open your normal file manager window at a folder it did not download into. This opens Chrome's own folder window instead. You can see and open every file in it; close it when you are done."
+        "One honest limit: Chrome does not let an extension open your normal file manager window at a folder it did not download into. This opens Chrome's own folder window instead. You can see and open every file in it, then close it.",
+        "Makes the filenames identical on Windows, Mac and Linux. Each operating system bans different characters in a filename, so the same report could save on one machine and fail on another. There is now one rule, the strictest of the three, applied on all of them - so whichever computer you run this on, you get the same files under the same names."
     ],
     "files": [
         "README.md",
@@ -13,6 +14,7 @@
         "icons/icon16.png",
         "icons/icon48.png",
         "lib/diagnostics.js",
+        "lib/safe-name.js",
         "manifest.json",
         "offscreen/offscreen.html",
         "offscreen/offscreen.js",

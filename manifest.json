@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Shopee Report Downloader",
-  "version": "1.19.1",
+  "version": "1.20.0",
   "description": "Download all 7 Shopee Seller Center reports with one click",
   "minimum_chrome_version": "116",
   "permissions": [
@@ -45,7 +45,7 @@
     },
     {
       "matches": ["https://seller.shopee.com.my/*"],
-      "js": ["content/content.js"],
+      "js": ["lib/safe-name.js", "content/content.js"],
       "run_at": "document_start",
       "world": "ISOLATED",
       "all_frames": false

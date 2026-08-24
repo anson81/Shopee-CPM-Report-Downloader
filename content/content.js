@@ -781,15 +781,16 @@
     return out;
   }
 
+  /**
+   * The one filename rule, shared with the worker and the offscreen writer.
+   *
+   * This used to be its own copy. Three copies is three chances to drift, and
+   * a name sanitised one way here and another way at the disk boundary is a
+   * file named differently from the one reported. lib/safe-name.js is loaded
+   * ahead of this script by the manifest.
+   */
   function sanitizeFilename(name) {
-    return stripControlChars(String(name || ''))
-      .split(/[\\/]/)
-      .pop()
-      // Windows-illegal characters. '+' and spaces are kept on purpose —
-      // Shopee's own names contain them and must not change.
-      .replace(/[<>:"|?*]/g, '')
-      .replace(/^\.+/, '')
-      .trim();
+    return self.SRD_safeFileName(name);
   }
 
   function extFromMime(mime, dataUrl) {
