@@ -672,6 +672,13 @@ const FOLDER_TROUBLE = {
     'No folder has been chosen yet. Open Settings and pick where reports should be saved.',
   permission:
     'Chrome needs you to allow the reports folder again. Open Settings and choose the same folder.',
+  // The writer reads every file back after saving it. These two mean the save
+  // raised no error and still produced nothing useful - the case that would
+  // otherwise tick green and be found blank days later.
+  empty:
+    'The file saved with nothing in it. It is in the folder, empty, under the right name. Run this report again.',
+  short:
+    'The file saved only partly - it is in the folder but incomplete. Run this report again.',
   error: 'The reports folder could not be written to.'
 };
 

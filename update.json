@@ -1,9 +1,8 @@
 {
-    "version": "1.20.0",
+    "version": "1.20.1",
     "notes": [
-        "Adds an 'Open folder' button beside Settings in the popup. It opens a folder window straight at the run you just downloaded - for example 'Shopee daily report/24082026-Monday-0915' - so you do not have to go looking for it.",
-        "One honest limit: Chrome does not let an extension open your normal file manager window at a folder it did not download into. This opens Chrome's own folder window instead. You can see and open every file in it, then close it.",
-        "Makes the filenames identical on Windows, Mac and Linux. Each operating system bans different characters in a filename, so the same report could save on one machine and fail on another. There is now one rule, the strictest of the three, applied on all of them - so whichever computer you run this on, you get the same files under the same names."
+        "The extension now checks its own work. After saving each report it reads the file back and makes sure it actually has something in it. Before this, a report was marked done simply because saving raised no error - so a file could land with the right name in the right folder and nothing inside, and you would only find out when you opened it.",
+        "If that ever happens you now get a clear message naming the report, and the empty file is left where it is rather than quietly deleted."
     ],
     "files": [
         "README.md",

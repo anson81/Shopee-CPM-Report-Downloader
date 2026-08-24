@@ -23,26 +23,34 @@ const vm = require('node:vm');
  * the LAST folder in the path, not on the root, so overriding the root alone
  * tests nothing. That mistake made this suite pass a broken close().
  */
-function fakeDir(log, name, failWrite) {
+function fakeDir(log, name, failWrite, onDisk = null) {
   return {
     name,
     async getDirectoryHandle(part, opts) {
       log.push(`dir:${part}:${opts && opts.create ? 'create' : 'plain'}`);
-      return fakeDir(log, part, failWrite);
+      return fakeDir(log, part, failWrite, onDisk);
     },
     async getFileHandle(file, opts) {
       log.push(`file:${file}:${opts && opts.create ? 'create' : 'plain'}`);
+      // What the file ends up holding, so getFile() can report it back the way
+      // a real handle would.
+      let landed = 0;
       return {
         async createWritable() {
           return {
             async write(bytes) {
               if (failWrite) throw new Error('disk full');
+              landed = onDisk === null ? bytes.length : onDisk;
               log.push(`write:${bytes.length}`);
             },
             async close() {
               log.push('close');
             }
           };
+        },
+        async getFile() {
+          log.push(`verify:${landed}`);
+          return { size: landed };
         }
       };
     },
@@ -149,7 +157,8 @@ test('writes into the nested folders, in order', async () => {
     'dir:23082026-Sunday-1418:create',
     'file:Order.all.20260723_20260821.xlsx:create',
     'write:5',
-    'close'
+    'close',
+    'verify:5'
   ]);
 });
 
@@ -270,4 +279,35 @@ test('an unsafe name is made safe at the disk boundary', async () => {
   // The reported path must name the file that actually landed, not the one we
   // were asked for - otherwise the popup points at a file that is not there.
   assert.ok(reply.path.endsWith('/report.csv'), reply.path);
+});
+
+test('a file that landed empty is reported, not ticked done', async () => {
+  const log = [];
+  // Everything succeeds - no error thrown - and yet nothing is in the file.
+  // Without this check the run ticks green and the report is blank when opened.
+  const { send } = boot({ root: fakeDir(log, 'Documents', false, 0) });
+  const reply = await send(MSG);
+
+  assert.strictEqual(reply.ok, false);
+  assert.strictEqual(reply.reason, 'empty');
+});
+
+test('a file that landed short is reported too', async () => {
+  const log = [];
+  // 5 bytes were written, 3 arrived. A truncated spreadsheet opens as
+  // corrupt rather than blank, which is harder to spot, not easier.
+  const { send } = boot({ root: fakeDir(log, 'Documents', false, 3) });
+  const reply = await send(MSG);
+
+  assert.strictEqual(reply.ok, false);
+  assert.strictEqual(reply.reason, 'short');
+});
+
+test('the check runs after close, because close is what commits', async () => {
+  const log = [];
+  const { send } = boot({ root: fakeDir(log, 'Documents') });
+  await send(MSG);
+
+  assert.ok(log.indexOf('close') < log.indexOf('verify:5'),
+    'verified before the bytes were committed: ' + log.join(', '));
 });

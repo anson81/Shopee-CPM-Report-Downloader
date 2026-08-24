@@ -129,14 +129,34 @@ async function write({ segments, filename, base64, probe }) {
   // rejects, so a name reaching this line unchecked would work on Linux and
   // fail on Windows. Defence at the boundary, not only at the source.
   const safeName = self.SRD_safeFileName(filename);
+  const bytes = bytesFromBase64(base64);
   const handle = await dir.getFileHandle(safeName, { create: true });
   const writable = await handle.createWritable();
   try {
-    await writable.write(bytesFromBase64(base64));
+    await writable.write(bytes);
   } finally {
     // Closing is what commits the file. Skipping it on a failed write would
     // leave a zero-byte file that looks like a successful save.
     await writable.close();
+  }
+
+  // CHECK OUR OWN WORK.
+  //
+  // Everything above can succeed without throwing and still leave a file with
+  // nothing in it. "done" would then mean "no error was raised", which is not
+  // the same as "the report is there" - and this project has a history of runs
+  // ticking green while the files were wrong. Read it back instead of assuming.
+  //
+  // Done after close(), because close() is what commits the bytes; asking
+  // before it would measure a file that is not finished.
+  //
+  // The bad file is left where it is. It is named in the error, and deleting
+  // something off the seller's disk to tidy up a failure is not this
+  // extension's business.
+  const landed = await handle.getFile();
+  if (!landed.size) return { ok: false, reason: 'empty', name: safeName };
+  if (landed.size !== bytes.length) {
+    return { ok: false, reason: 'short', name: safeName, wrote: bytes.length, found: landed.size };
   }
 
   return { ok: true, path: `${(segments || []).filter(Boolean).join('/')}/${safeName}` };
