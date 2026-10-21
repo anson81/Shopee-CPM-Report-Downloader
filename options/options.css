@@ -120,6 +120,14 @@ h2 {
   color: var(--muted);
 }
 
+label.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  cursor: pointer;
+}
+
 input[type="text"] {
   font: inherit;
   padding: 7px 9px;

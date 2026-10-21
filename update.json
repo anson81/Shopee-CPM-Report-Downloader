@@ -1,13 +1,15 @@
 {
-    "version": "1.20.2",
+    "version": "1.21.0",
     "notes": [
-        "You can now pick yesterday in the Real Time date box first thing in the morning. Before 8am it would only go up to the day before yesterday."
+        "New report #11, By Month (last month): the whole of last month, for comparing with Past 30 Days. If Shopee hands back a different month, the row says so instead of ticking green.",
+        "After each run, the Product Performance reports are sent to ProfitLens for the Campaign Planner, using the ProfitLens login already open in this browser. If you are not logged in, the files are still saved and each one gets a Push button. You can switch this off in Settings."
     ],
     "files": [
         "README.md",
         "background/background.js",
         "content/content.js",
         "content/interceptor.js",
+        "content/profitlens.js",
         "icons/icon128.png",
         "icons/icon16.png",
         "icons/icon48.png",

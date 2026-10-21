@@ -68,6 +68,7 @@ function boot({ root = undefined, saved = {} } = {}) {
   let listener = null;
   const sandbox = {
     atob: (b64) => Buffer.from(b64, 'base64').toString('binary'),
+    btoa: (bin) => Buffer.from(bin, 'binary').toString('base64'),
     Uint8Array,
     console,
     // The writer only ever reads one key, so the store is a single value.
@@ -310,4 +311,84 @@ test('the check runs after close, because close is what commits', async () => {
 
   assert.ok(log.indexOf('close') < log.indexOf('verify:5'),
     'verified before the bytes were committed: ' + log.join(', '));
+});
+
+/* --- reading a saved report back, for the push to ProfitLens ----------- */
+
+/** A folder holding one file, or none: what read() walks. */
+function readableDir(log, files) {
+  return {
+    async getDirectoryHandle(part, opts) {
+      log.push(`dir:${part}:${opts && opts.create ? 'create' : 'plain'}`);
+      if (!files.dirs.includes(part)) {
+        throw Object.assign(new Error('gone'), { name: 'NotFoundError' });
+      }
+      return readableDir(log, files);
+    },
+    async getFileHandle(name, opts) {
+      log.push(`file:${name}:${opts && opts.create ? 'create' : 'plain'}`);
+      if (!(name in files.content)) {
+        throw Object.assign(new Error('gone'), { name: 'NotFoundError' });
+      }
+      const bytes = Buffer.from(files.content[name], 'binary');
+      return {
+        async getFile() {
+          return {
+            size: bytes.length,
+            async arrayBuffer() {
+              return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length);
+            }
+          };
+        }
+      };
+    },
+    async queryPermission() {
+      return 'granted';
+    }
+  };
+}
+
+const READ = {
+  target: 'offscreen-writer',
+  op: 'read',
+  segments: ['Shopee daily report', '21102026-Wednesday-0812'],
+  filename: 'parentskudetail.20260901_20260930.xlsx'
+};
+
+test('read returns the saved bytes as base64, exactly', async () => {
+  const log = [];
+  const content = 'PK\u0003\u0004 binary \u00ff\u0000 bytes';
+  const { send } = boot({
+    root: readableDir(log, {
+      dirs: READ.segments,
+      content: { [READ.filename]: content }
+    })
+  });
+  const reply = await send(READ);
+
+  assert.strictEqual(reply.ok, true);
+  assert.strictEqual(Buffer.from(reply.base64, 'base64').toString('binary'), content);
+  assert.strictEqual(reply.size, content.length);
+});
+
+test('read never creates a folder or a file', async () => {
+  const log = [];
+  const { send } = boot({
+    root: readableDir(log, { dirs: READ.segments, content: { [READ.filename]: 'x' } })
+  });
+  await send(READ);
+  assert.ok(log.every((l) => !l.endsWith(':create')), log.join(', '));
+});
+
+test('a file that is no longer there is reported as missing', async () => {
+  const { send } = boot({ root: readableDir([], { dirs: READ.segments, content: {} }) });
+  const reply = await send(READ);
+  assert.strictEqual(reply.ok, false);
+  assert.strictEqual(reply.reason, 'missing');
+});
+
+test('reading with no folder chosen says so', async () => {
+  const { send } = boot({ root: undefined });
+  const reply = await send(READ);
+  assert.strictEqual(reply.reason, 'no-folder');
 });

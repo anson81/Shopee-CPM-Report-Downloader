@@ -34,6 +34,20 @@
     datePickerPanels: all('.eds-date-picker-panel').map(desc),
     prevArrows: all('.eds-picker-header__prev').map(desc),
     dateCells: all('.eds-date-table__cell').length,
+    // By Month (#11) was written without seeing this panel. Open the calendar,
+    // hover "By Month" so the month grid shows, THEN paste this script — the
+    // lines below are what selectSpecificMonth() has to match.
+    monthPanel: all('.eds-date-picker-panel, [class*="month-picker"], [class*="picker-panel"]')
+      .filter(vis)
+      .map((p) => ({
+        panel: desc(p),
+        header: all('[class*="header"]', p).filter(vis).map((h) => squash(h.textContent)).slice(0, 3),
+        cells: all('[class*="month"]', p)
+          .filter(vis)
+          .filter((c) => squash(c.textContent).length <= 12)
+          .map((c) => `${desc(c)} :: "${squash(c.textContent)}"`)
+          .slice(0, 30)
+      })),
     exportButtons: all('button.export, div.eds-dropdown.export button').map(
       (b) => `${desc(b)} :: "${squash(b.textContent)}"`
     ),

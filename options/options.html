@@ -27,6 +27,28 @@
       </section>
 
       <section class="card">
+        <h2>ProfitLens</h2>
+        <p class="hint">
+          After each run, the Product Performance reports are sent to
+          ProfitLens for the Campaign Planner. It uses the ProfitLens login
+          already open in this browser &mdash; nothing is stored here. If you
+          are not logged in, the files are still saved and each one gets a
+          Push button to send it later.
+        </p>
+        <label class="check">
+          <input id="push-on" type="checkbox" />
+          Send Product Performance reports to ProfitLens
+        </label>
+        <div class="row fields">
+          <label>Address <input id="pl-origin" type="text" placeholder="https://profitlens.my" /></label>
+        </div>
+        <div class="row">
+          <button id="save-pl" class="primary">Save</button>
+          <span id="pl-saved" class="saved" hidden>Saved</span>
+        </div>
+      </section>
+
+      <section class="card">
         <h2>Updates</h2>
         <div id="status" class="status">Checking…</div>
         <ul id="notes" class="notes" hidden></ul>

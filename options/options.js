@@ -200,6 +200,40 @@ el.saveSource.addEventListener('click', async () => {
 });
 
 /* ------------------------------------------------------------------ *
+ * ProfitLens
+ *
+ * Defaults match PUSH_DEFAULTS in background.js: on, and the live address.
+ * The address only needs changing for a local dev server.
+ * ------------------------------------------------------------------ */
+const PL_DEFAULT_ORIGIN = 'https://profitlens.my';
+const plOn = document.getElementById('push-on');
+const plOrigin = document.getElementById('pl-origin');
+const plSaved = document.getElementById('pl-saved');
+
+async function loadProfitLens() {
+  const stored = await chrome.storage.local.get(['profitLensOrigin', 'pushToProfitLens']);
+  plOn.checked = typeof stored.pushToProfitLens === 'boolean' ? stored.pushToProfitLens : true;
+  plOrigin.value = stored.profitLensOrigin || PL_DEFAULT_ORIGIN;
+}
+
+document.getElementById('save-pl').addEventListener('click', async () => {
+  let origin = plOrigin.value.trim() || PL_DEFAULT_ORIGIN;
+  try {
+    // An origin only — a pasted page URL keeps working.
+    origin = new URL(origin).origin;
+  } catch (_) {
+    plSaved.hidden = false;
+    plSaved.textContent = 'That is not a web address';
+    return;
+  }
+  plOrigin.value = origin;
+  await chrome.storage.local.set({ profitLensOrigin: origin, pushToProfitLens: plOn.checked });
+  plSaved.textContent = 'Saved';
+  plSaved.hidden = false;
+  setTimeout(() => (plSaved.hidden = true), 2000);
+});
+
+/* ------------------------------------------------------------------ *
  * Folder access
  * ------------------------------------------------------------------ */
 async function handlePermission(handle, request) {
@@ -515,6 +549,7 @@ el.install.addEventListener('click', async () => {
 (async function init() {
   el.version.textContent = `v${chrome.runtime.getManifest().version}`;
   await loadSource();
+  await loadProfitLens();
   await refreshOutputStatus();
   await refreshFolderStatus();
   await checkForUpdate(false);

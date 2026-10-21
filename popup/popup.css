@@ -296,6 +296,44 @@ button.danger {
   overflow-wrap: anywhere;
 }
 
+/* What ProfitLens said about the file. Amber, not red, when it failed: the
+   report itself is saved, only the hand-over is outstanding. */
+.push {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.push.done {
+  color: var(--ok);
+}
+
+.push.error {
+  color: #b45309;
+}
+
+.push-retry {
+  flex: none;
+  padding: 2px 10px;
+  font: inherit;
+  font-weight: 600;
+  color: #fff;
+  background: var(--shopee);
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.push-retry:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .row.done .icon {
   color: var(--ok);
 }

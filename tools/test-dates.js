@@ -168,6 +168,46 @@ test('the two order files can never share a name', () => {
   assert.notEqual(D.orderFilename(b.recent), D.orderFilename(b.previous));
 });
 
+/* --- #11 By Month (last month) ---------------------------------------- */
+
+test('lastMonthSpan is the whole calendar month before the base day', () => {
+  const s = D.lastMonthSpan(on(2026, 10, 21));
+  assert.equal(D.ymd(s.from), '2026-09-01');
+  assert.equal(D.ymd(s.to), '2026-09-30');
+});
+
+test('lastMonthSpan gets every month length right', () => {
+  assert.equal(D.ymd(D.lastMonthSpan(on(2026, 9, 1)).to), '2026-08-31'); // 31
+  assert.equal(D.ymd(D.lastMonthSpan(on(2026, 3, 31)).to), '2026-02-28'); // 28
+  assert.equal(D.ymd(D.lastMonthSpan(on(2028, 3, 15)).to), '2028-02-29'); // leap
+  assert.equal(D.ymd(D.lastMonthSpan(on(2026, 5, 31)).to), '2026-04-30'); // 30, from a 31st
+});
+
+test('lastMonthSpan in January is December of the year before', () => {
+  const s = D.lastMonthSpan(on(2027, 1, 3));
+  assert.equal(D.ymd(s.from), '2026-12-01');
+  assert.equal(D.ymd(s.to), '2026-12-31');
+});
+
+test('exportDates: By Month follows a pinned day, like every other row', () => {
+  assert.equal(D.ymd(D.exportDates(on(2026, 10, 21), '')[11].from), '2026-09-01');
+  // Pinned early in the same month: last month is still September.
+  assert.equal(D.ymd(D.exportDates(on(2026, 10, 21), '2026-10-02')[11].to), '2026-09-30');
+  // Pinned into September, last month is August.
+  assert.equal(D.ymd(D.exportDates(on(2026, 10, 21), '2026-09-30')[11].from), '2026-08-01');
+});
+
+test('performanceFilename predicts the Product Performance name', () => {
+  const s = D.lastMonthSpan(on(2026, 10, 21));
+  assert.equal(D.performanceFilename(s), 'parentskudetail.20260901_20260930.xlsx');
+});
+
+test('yearsBetween counts year-arrow presses and never goes negative', () => {
+  assert.equal(D.yearsBetween(on(2026, 10, 21), on(2026, 9, 1)), 0);
+  assert.equal(D.yearsBetween(on(2027, 1, 3), on(2026, 12, 1)), 1);
+  assert.equal(D.yearsBetween(on(2026, 1, 3), on(2027, 1, 1)), 0);
+});
+
 test('orderRangeText matches what the modal displays', () => {
   const b = D.orderBlocks(on(2026, 8, 11), '');
   assert.equal(D.orderRangeText(b.recent), '2026/07/12 – 2026/08/10');

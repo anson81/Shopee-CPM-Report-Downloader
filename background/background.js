@@ -47,6 +47,16 @@ const EXPORTS = [
     kind: 'order',
     block: 'previous',
     url: ORDER_URL
+  },
+  // The Campaign Planner in ProfitLens compares Past 30 Days (#8) with the last
+  // full calendar month. This is that month.
+  {
+    id: 11,
+    key: 'bymonth_last',
+    name: 'By Month (last month)',
+    label: 'By Month',
+    kind: 'bi',
+    url: BI_URL
   }
 ];
 
@@ -326,10 +336,38 @@ function monthsBetween(now, target) {
   );
 }
 
+/** Whole years from `target` up to `now` — how many times to press the year
+ *  arrow on the By Month calendar, which opens on the real current year. */
+function yearsBetween(now, target) {
+  return Math.max(0, now.getFullYear() - target.getFullYear());
+}
+
 function addDays(d, n) {
   const out = new Date(d);
   out.setDate(d.getDate() + n);
   return out;
+}
+
+/**
+ * The whole calendar month before `base` — what By Month (last month) covers.
+ *
+ * The Campaign Planner compares this with Past 30 Days, so it has to be a
+ * complete month and never a part-finished one. Day 0 of a month is the last
+ * day of the one before, whatever its length.
+ */
+function lastMonthSpan(base) {
+  const from = new Date(base.getFullYear(), base.getMonth() - 1, 1);
+  const to = new Date(base.getFullYear(), base.getMonth(), 0);
+  return { from, to };
+}
+
+/**
+ * Shopee's name for a Product Performance export: parentskudetail.20260901_20260930.xlsx.
+ * Known before we ask, so the file that comes back can be checked against it.
+ */
+function performanceFilename(span) {
+  const compact = (d) => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
+  return `parentskudetail.${compact(span.from)}_${compact(span.to)}.xlsx`;
 }
 
 function shortDate(d) {
@@ -414,7 +452,8 @@ function exportDates(now, realtimeDate) {
     // Same reasoning for Past 30 Days: it is Shopee's own rolling button.
     8: null,
     9: blocks.recent,
-    10: blocks.previous
+    10: blocks.previous,
+    11: lastMonthSpan(base)
   };
 }
 
@@ -558,6 +597,18 @@ function computeParams(ex, realtimeDate) {
 
   // The week immediately before Past 7 Days. See exportDates().
   if (ex.key === 'byweek_last') pickWeek(addDays(mondayOf(p7.from), -7));
+
+  // By Month: the calendar's month grid, one year page at a time. The year is
+  // passed as well as the presses, so the content script can read the year on
+  // screen and stop on it rather than trust a count.
+  if (ex.key === 'bymonth_last') {
+    const span = lastMonthSpan(base);
+    params.useCalendarMonth = true;
+    params.targetYear = span.from.getFullYear();
+    params.targetMonth = span.from.getMonth() + 1;
+    params.yearsBack = yearsBetween(now, span.from);
+    params.expectedName = performanceFilename(span);
+  }
 
   // Orders: which block this export covers, and the exact filename Shopee
   // will publish for it. See orderFilename() for why the name matters.
@@ -912,7 +963,8 @@ async function recordHistory(selected) {
         name: ex.name,
         status: result.status || 'unknown',
         filename: result.filename || '',
-        error: result.error || ''
+        error: result.error || '',
+        push: (result.push && result.push.text) || ''
       };
     })
   };
@@ -974,6 +1026,24 @@ function assertNotStale(ex, filename) {
     `Shopee returned the same file as #${clash.id} ${clash.name} ` +
       `("${filename}") instead of a new one — it was probably still rate-limited. ` +
       `Wait a minute and re-run export #${ex.id}.`
+  );
+}
+
+/**
+ * By Month names its own period, so the file that came back can be checked.
+ *
+ * The month cell is clicked on a calendar nobody here had seen when this was
+ * written, so a wrong click is the likeliest failure — and a wrong month would
+ * otherwise tick green and feed the Campaign Planner the wrong comparison.
+ */
+function assertExpectedMonth(ex, filename, params) {
+  if (ex.key !== 'bymonth_last' || !params.expectedName) return;
+  if (filename === params.expectedName) return;
+  throw new AppError(
+    `Shopee gave us "${filename || 'a file with no name'}" instead of ` +
+      `"${params.expectedName}" — the wrong month was picked. That file is in the folder under ` +
+      "its own name and will not be sent to ProfitLens. Run export #11 again; if it repeats, " +
+      'copy diagnostics.'
   );
 }
 
@@ -1137,6 +1207,7 @@ async function runFurious(selected) {
         params
       });
       assertNotStale(slot.ex, name);
+      assertExpectedMonth(slot.ex, name, params);
       if (slot.ex.kind === 'order') {
         logOrder(
           `#${slot.ex.id} collect: saved as ${name} after ${res.looks || '?'} look(s)` +
@@ -1188,6 +1259,274 @@ async function confirmDownload(res, ctx) {
       'Run this report again. If it keeps happening, open the Options page and click ' +
       'Copy diagnostics.'
   );
+}
+
+/* ==================================================================== *
+ * Push to ProfitLens
+ *
+ * After a run, every Product Performance file (parentskudetail.*.xlsx) goes to
+ * ProfitLens, where the Campaign Planner reads it. Ported from the SiteGiant
+ * Downloader: the upload runs from a content script ON ProfitLens, so it
+ * borrows the seller's own session and this extension stores no credential.
+ *
+ * A failed push never fails the run. The file is saved either way; the row
+ * stays green and gets a second line saying what happened, with a Push button
+ * to try that one file again.
+ * ==================================================================== */
+const PUSH_DEFAULTS = {
+  profitLensOrigin: 'https://profitlens.my',
+  pushToProfitLens: true
+};
+
+/** ProfitLens's upload limit. Anything larger is refused before it is sent. */
+const MAX_PUSH_BYTES = 15 * 1024 * 1024;
+
+/* PURE-PUSH-START */
+/* No `chrome`, no `state`, no DOM between these markers:
+ * tools/test-profitlens-push.js slices this region out and runs it alone. */
+
+const PUSH_ENDPOINT = '/api/import/product-performance';
+
+/**
+ * Which finished reports go to ProfitLens: Product Performance files only.
+ *
+ * Shopee's BI reports (1–5, 8, 11) are all parentskudetail exports. Ads and
+ * Orders are other files ProfitLens does not take on this endpoint, and a row
+ * that failed — including By Month with the wrong month in its name — has
+ * nothing trustworthy to send.
+ */
+function pushCandidates(results, exportsList) {
+  return exportsList
+    .filter((ex) => ex.kind === 'bi')
+    .filter((ex) => {
+      const r = results && results[ex.id];
+      return !!r && r.status === 'done' && /^parentskudetail\./i.test(r.filename || '');
+    })
+    .map((ex) => ex.id);
+}
+
+/** The second line under a pushed row. */
+function pushSummary(res) {
+  const n = (v) => Number(v) || 0;
+  return (
+    `ProfitLens: ${n(res.created)} new · ${n(res.updated)} updated · ` +
+    `${n(res.unchanged)} unchanged`
+  );
+}
+
+/** The second line under a row whose push failed. The file is always saved. */
+function pushFailure(message) {
+  if (message === 'NOT_LOGGED_IN') {
+    return 'ProfitLens: Not logged in to ProfitLens — the file is saved, log in and press Push';
+  }
+  return `ProfitLens: ${message} — the file is saved, press Push to try again`;
+}
+
+/* PURE-PUSH-END */
+
+async function getPushSettings() {
+  const stored = await chrome.storage.local.get(['profitLensOrigin', 'pushToProfitLens']);
+  return {
+    profitLensOrigin: String(stored.profitLensOrigin || PUSH_DEFAULTS.profitLensOrigin).replace(
+      /\/+$/,
+      ''
+    ),
+    pushToProfitLens:
+      typeof stored.pushToProfitLens === 'boolean'
+        ? stored.pushToProfitLens
+        : PUSH_DEFAULTS.pushToProfitLens
+  };
+}
+
+/** Pings until profitlens.js answers, injecting it once if it is not there. */
+async function waitForProfitLensScript(tabId, timeoutMs) {
+  const deadline = Date.now() + (timeoutMs || 20000);
+  let injected = false;
+  for (;;) {
+    try {
+      const res = await chrome.tabs.sendMessage(tabId, { type: 'ping' });
+      if (res && res.ok) return true;
+    } catch (_) {
+      /* not ready */
+    }
+    // A tab open before this version was installed has no script in it.
+    if (!injected) {
+      injected = true;
+      await chrome.scripting.executeScript({ target: { tabId }, files: ['content/profitlens.js'] });
+    }
+    if (Date.now() > deadline) throw new Error('ProfitLens did not respond');
+    await sleep(300);
+  }
+}
+
+/**
+ * A ProfitLens tab we can run in: an open one if it answers, else a new one.
+ *
+ * Origins are compared here rather than in the manifest, because Chrome match
+ * patterns cannot hold a port and a local dev server lives on one. A discarded
+ * tab reports the right URL and cannot be scripted, so each candidate is tried.
+ * Returns whether the tab was opened for this, so it can be closed after.
+ */
+async function ensureProfitLensTab(origin) {
+  const all = await chrome.tabs.query({});
+  for (const tab of all) {
+    if (!tab.url || tab.discarded) continue;
+    if (tab.url !== origin && !tab.url.startsWith(`${origin}/`)) continue;
+    try {
+      await waitForProfitLensScript(tab.id, 6000);
+      return { tabId: tab.id, opened: false };
+    } catch (_) {
+      /* unusable — try the next one */
+    }
+  }
+
+  const tab = await chrome.tabs.create({ url: origin, active: false });
+  const deadline = Date.now() + 45000;
+  for (;;) {
+    const t = await getTab(tab.id);
+    if (!t) throw new Error('The ProfitLens tab was closed');
+    if (t.status === 'complete') break;
+    if (Date.now() > deadline) throw new Error('ProfitLens took too long to load');
+    await sleep(300);
+  }
+  await waitForProfitLensScript(tab.id);
+  return { tabId: tab.id, opened: true };
+}
+
+/** Reads a saved report back off disk, as base64. */
+async function readSavedFile(segments, filename) {
+  await ensureOffscreen();
+  const reply = await chrome.runtime.sendMessage({
+    target: 'offscreen-writer',
+    op: 'read',
+    segments,
+    filename
+  });
+  if (reply && reply.ok) return reply;
+  const reason = (reply && reply.reason) || 'error';
+  if (reason === 'missing') throw new Error(`"${filename}" is no longer in the reports folder`);
+  throw new Error(FOLDER_TROUBLE[reason] || (reply && reply.error) || FOLDER_TROUBLE.error);
+}
+
+/**
+ * Sends one saved file. Throws with words a seller can act on.
+ * `session` is shared across one batch so a run opens at most one tab.
+ */
+async function pushOne(segments, filename, settings, session) {
+  const file = await readSavedFile(segments, filename);
+  if (file.size > MAX_PUSH_BYTES) {
+    throw new Error(
+      `that file is ${(file.size / 1048576).toFixed(1)} MB and ProfitLens accepts 15 MB`
+    );
+  }
+
+  if (!session.tabId) {
+    try {
+      Object.assign(session, await ensureProfitLensTab(settings.profitLensOrigin));
+    } catch (err) {
+      // Chrome withholding host access is a settings problem, and the raw
+      // message gives no clue what to do about it.
+      if (/Cannot access contents|must request permission/i.test((err && err.message) || '')) {
+        throw new Error(
+          `Chrome is blocking access to ${settings.profitLensOrigin}. Open chrome://extensions → ` +
+            'Shopee Report Downloader → Details → Site access → "On all sites"'
+        );
+      }
+      throw err;
+    }
+  }
+
+  const res = await chrome.tabs.sendMessage(session.tabId, {
+    type: 'push',
+    endpoint: PUSH_ENDPOINT,
+    filename,
+    base64: file.base64
+  });
+  if (!res) throw new Error('ProfitLens did not answer');
+  if (res.error) throw new Error(res.error);
+  return res;
+}
+
+async function closePushSession(session) {
+  if (session.opened && session.tabId != null) {
+    try {
+      await chrome.tabs.remove(session.tabId);
+    } catch (_) {
+      /* already gone */
+    }
+  }
+}
+
+/**
+ * After a run: push every Product Performance file this run saved.
+ * One at a time, in report order. Never throws.
+ */
+async function pushAfterRun() {
+  const settings = await getPushSettings();
+  if (!settings.pushToProfitLens) return;
+
+  const ids = pushCandidates(state.results, EXPORTS);
+  if (!ids.length) return;
+
+  const segments = folderSegments();
+  if (!segments) return;
+
+  const session = {};
+  try {
+    for (const id of ids) {
+      if (state.cancel) break;
+      const filename = state.results[id].filename;
+      setResult(id, { push: { status: 'running', text: 'ProfitLens: sending…' } });
+      try {
+        const res = await pushOne(segments, filename, settings, session);
+        setResult(id, { push: { status: 'done', text: pushSummary(res) } });
+      } catch (e) {
+        setResult(id, { push: { status: 'error', text: pushFailure((e && e.message) || String(e)) } });
+      }
+    }
+  } finally {
+    await closePushSession(session);
+  }
+}
+
+/**
+ * The Push button: one file from the last run, again.
+ *
+ * Reads what to send from `lastRun` in storage, never from worker memory — the
+ * button is most likely pressed after logging in to ProfitLens, minutes later,
+ * on a worker Chrome has restarted since.
+ */
+async function pushFromLastRun(id) {
+  const { lastRun, history = [] } = await chrome.storage.local.get(['lastRun', 'history']);
+  const row = lastRun && lastRun.results && lastRun.results[id];
+  if (!row || !row.filename || !lastRun.runFolder) {
+    return { ok: false, error: 'That report is not in the last run any more.' };
+  }
+
+  const settings = await getPushSettings();
+  const session = {};
+  let push;
+  try {
+    const res = await pushOne([ROOT_FOLDER, lastRun.runFolder], row.filename, settings, session);
+    push = { status: 'done', text: pushSummary(res) };
+  } catch (e) {
+    push = { status: 'error', text: pushFailure((e && e.message) || String(e)) };
+  } finally {
+    await closePushSession(session);
+  }
+
+  row.push = push;
+  // The history entry for the same run, so the outcome survives there too.
+  const entry = history.find((h) => h.runFolder === lastRun.runFolder);
+  const reportEntry = entry && (entry.reports || []).find((r) => r.id === id);
+  if (reportEntry) reportEntry.push = push.text;
+  await chrome.storage.local.set({ lastRun, history });
+
+  // What the popup is showing, if it is still this run.
+  if (!state.running && state.results[id] && state.results[id].filename === row.filename) {
+    setResult(id, { push });
+  }
+  return { ok: push.status === 'done', push };
 }
 
 async function runExports(ids, mode) {
@@ -1277,6 +1616,16 @@ async function runExports(ids, mode) {
         row.error = message;
         row.detail = '';
       }
+    }
+  }
+
+  // Hand the Product Performance files to ProfitLens while the run folder is
+  // still known. Never on a Stop: the seller asked for things to end.
+  if (!state.cancel) {
+    try {
+      await pushAfterRun();
+    } catch (_) {
+      /* a push must never sink a run whose files are already saved */
     }
   }
 
@@ -1494,6 +1843,7 @@ async function handle(msg, sender) {
     // tested without a browser.
     case 'getDiagnostics': {
       const stored = await chrome.storage.local.get(['history', 'updateSource', 'updateCache']);
+      const push = await getPushSettings();
       return {
         ok: true,
         report: Diagnostics.buildReport({
@@ -1516,7 +1866,12 @@ async function handle(msg, sender) {
             .sort((a, b) => b.lastAt - a.lastAt),
           workerStartedAt,
           history: stored.history || [],
-          historyLimit: 5
+          historyLimit: 5,
+          // Same two lines the SiteGiant twin reports, worded the same.
+          notes: [
+            'ProfitLens origin: ' + push.profitLensOrigin,
+            'Push to ProfitLens: ' + (push.pushToProfitLens ? 'on' : 'off')
+          ]
         })
       };
     }
@@ -1595,6 +1950,10 @@ async function handle(msg, sender) {
 
     case 'saveFile':
       return saveFile(msg.dataUrl, msg.filename);
+
+    case 'pushReport':
+      if (state.running) return { ok: false, error: 'Wait for the run to finish.' };
+      return pushFromLastRun(Number(msg.id));
 
     default:
       return { ok: false, error: `Unknown message: ${msg.type}` };

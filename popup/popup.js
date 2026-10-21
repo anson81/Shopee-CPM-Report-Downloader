@@ -111,6 +111,31 @@ function buildRows(results) {
 
     body.appendChild(name);
     if (detail.textContent) body.appendChild(detail);
+
+    // What ProfitLens said about this file. A failure here never turns the
+    // row red - the file is saved - so it gets its own line and its own retry.
+    const push = row && row.push;
+    if (push && push.text) {
+      const line = document.createElement('div');
+      line.className = `push ${push.status || ''}`;
+      line.appendChild(Object.assign(document.createElement('span'), { textContent: push.text }));
+      if (push.status === 'error') {
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'push-retry';
+        retry.textContent = 'Push';
+        retry.disabled = !!(runningNow || noFolder);
+        retry.addEventListener('click', async () => {
+          retry.disabled = true;
+          retry.textContent = 'Sending…';
+          const res = await send({ type: 'pushReport', id: def.id });
+          if (res && res.ok === false && res.error) showBanner(res.error);
+          await refresh();
+        });
+        line.appendChild(retry);
+      }
+      body.appendChild(line);
+    }
     li.appendChild(icon);
     li.appendChild(body);
     el.rows.appendChild(li);
@@ -259,8 +284,12 @@ async function loadHistory() {
   if (res && res.ok) renderHistory(res.history || []);
 }
 
+/** Whether a run is going, for controls built inside the rows. */
+let runningNow = false;
+
 function render(runState, lastRun) {
   const running = !!(runState && runState.running);
+  runningNow = running;
 
   setButton(el.runFurious, running);
   // render() runs after loadExports() and on every state change, so the folder

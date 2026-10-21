@@ -162,12 +162,56 @@ async function write({ segments, filename, base64, probe }) {
   return { ok: true, path: `${(segments || []).filter(Boolean).join('/')}/${safeName}` };
 }
 
+function base64FromBytes(bytes) {
+  // In slices: String.fromCharCode(...bytes) on a whole report overflows the
+  // call stack well before a month of Product Performance data.
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
+}
+
+/**
+ * Reads a saved report back, for the push to ProfitLens.
+ *
+ * From disk rather than from the worker's memory, on purpose: the Push button
+ * may be pressed long after the run, by which time Chrome has restarted the
+ * worker and anything it held is gone. The file in the folder is the one thing
+ * that is certainly still there - and it is the file the seller has, so what
+ * ProfitLens receives is exactly what is on their disk.
+ *
+ * Never creates anything: a folder that is not there is a missing file, not
+ * one to make.
+ */
+async function read({ segments, filename }) {
+  const root = await idbGet(OUTPUT_KEY);
+  if (!root) return { ok: false, reason: 'no-folder' };
+  const granted = await root.queryPermission({ mode: 'readwrite' });
+  if (granted !== 'granted') return { ok: false, reason: 'permission' };
+
+  let dir = root;
+  try {
+    for (const part of (segments || []).filter(Boolean)) {
+      dir = await dir.getDirectoryHandle(part);
+    }
+    const handle = await dir.getFileHandle(self.SRD_safeFileName(filename));
+    const file = await handle.getFile();
+    if (!file.size) return { ok: false, reason: 'empty' };
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    return { ok: true, size: file.size, base64: base64FromBytes(bytes) };
+  } catch (err) {
+    if (err && err.name === 'NotFoundError') return { ok: false, reason: 'missing' };
+    throw err;
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   // Returning undefined is what tells Chrome we are not answering. Returning
   // true and never calling back would hang the sender for ever.
   if (!msg || msg.target !== 'offscreen-writer') return undefined;
 
-  write(msg)
+  (msg.op === 'read' ? read(msg) : write(msg))
     .then(sendResponse)
     .catch((err) =>
       sendResponse({ ok: false, reason: 'error', error: (err && err.message) || String(err) })

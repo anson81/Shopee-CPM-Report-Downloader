@@ -36,6 +36,9 @@
       'Could not select the target week in the calendar. Try selecting it manually and re-run.',
     DAY_FAILED:
       'Could not select the target date in the calendar. Try selecting it manually and re-run.',
+    MONTH_FAILED:
+      'Could not select last month in the By Month calendar. Shopee may have changed it — ' +
+      'run tools/inspect-shopee.js with that calendar open and send the output.',
     NO_NEW_REPORT:
       'Shopee did not start a new report after clicking Export. It may still be rate-limited — wait a minute and try again.',
     STALE_REPORT:
@@ -499,7 +502,7 @@
     return queryText(PERIOD_RE)[0] || null;
   }
 
-  async function openBiCalendar(shortcutRe, failMessage) {
+  async function openBiCalendar(shortcutRe, failMessage, panelSelector) {
     const input = await waitFor(() => findDateTrigger(), { timeout: 8000 });
     if (!input) throw new AppError(failMessage);
     fullClick(input);
@@ -524,9 +527,10 @@
     hover(shortcut);
     await wait(1000);
 
-    const panel = await waitFor(() => $$vis('.eds-date-picker-panel')[0], {
-      timeout: 5000
-    });
+    const panel = await waitFor(
+      () => $$vis(panelSelector || '.eds-date-picker-panel')[0],
+      { timeout: 5000 }
+    );
     if (!panel) throw new AppError(failMessage);
     return panel;
   }
@@ -585,6 +589,99 @@
     report('Selecting last week in the calendar…');
     const panel = await openBiCalendar(/^by\s*week$/i, ERR.WEEK_FAILED);
     return pickCalendarDay(panel, params, ERR.WEEK_FAILED);
+  }
+
+  /**
+   * Export 11: By Month — last month, from the same calendar's month grid.
+   *
+   * WRITTEN BLIND. Nobody had seen Shopee's By Month panel when this went in,
+   * so every step is defensive and the background checks the filename that
+   * comes back (parentskudetail.<first>_<last>.xlsx). A wrong click therefore
+   * fails loudly instead of saving the wrong month as if it were right.
+   *
+   * The year is read off the panel and stepped until it matches, rather than
+   * pressing the arrow a counted number of times: the picker may open on the
+   * current year or on whichever year was last chosen, and a count is only
+   * right for one of those. The count is the fallback when no year is shown.
+   */
+  /** The year a month panel is showing, or null if it does not say. */
+  function panelYear(panel) {
+    const header =
+      $$('[class*="header"]', panel).filter(isVisible)[0] || panel;
+    const m = /\b(20\d{2})\b/.exec(squash(header.textContent));
+    return m ? Number(m[1]) : null;
+  }
+
+  /** True when a cell's own text names month `n` (1–12). */
+  function namesMonth(text, n) {
+    const t = squash(text).toLowerCase().replace(/\.$/, '');
+    if (!t || t.length > 12) return false;
+    if (t === String(n) || t === `${n}月` || t === pad2(n)) return true;
+    // MONTH_NAMES is the Orders calendar's list, further down this file.
+    return t.slice(0, 3) === MONTH_NAMES[n - 1].slice(0, 3).toLowerCase() && /^[a-z]+$/.test(t);
+  }
+
+  function pad2(n) {
+    return String(n).padStart(2, '0');
+  }
+
+  /** The twelve month cells, innermost element per cell. */
+  function monthCells(panel) {
+    const scoped = $$('[class*="month"]', panel).filter(isVisible);
+    const pool = scoped.length ? scoped : $$('td, div, span', panel).filter(isVisible);
+    return pool.filter((el) => {
+      const own = squash(el.textContent);
+      if (!own || own.length > 12) return false;
+      // Keep only the element that holds the text, not every wrapper above it.
+      return !Array.from(el.children).some((c) => squash(c.textContent) === own);
+    });
+  }
+
+  async function selectSpecificMonth(params) {
+    const label = `${MONTH_NAMES[params.targetMonth - 1]} ${params.targetYear}`;
+    report(`Selecting ${label} in the calendar…`);
+    const panel = await openBiCalendar(
+      /^by\s*month$/i,
+      ERR.MONTH_FAILED,
+      '.eds-date-picker-panel, [class*="month-picker"], [class*="picker-panel"]'
+    );
+
+    // Step back to the target year. [0] is the year arrow on every Shopee
+    // calendar seen so far — on the day panel [1] is the month arrow.
+    let pressed = 0;
+    for (let i = 0; i < 5; i++) {
+      const shown = panelYear(panel);
+      if (shown != null && shown <= params.targetYear) break;
+      if (shown == null && pressed >= (params.yearsBack || 0)) break;
+      const prev = $$('.eds-picker-header__prev, [class*="header"] [class*="prev"]').filter(
+        isVisible
+      )[0];
+      if (!prev) throw new AppError(ERR.MONTH_FAILED);
+      fullClick(prev);
+      pressed++;
+      await wait(1000);
+    }
+    const shown = panelYear(panel);
+    if (shown != null && shown !== params.targetYear) {
+      throw new AppError(
+        `The By Month calendar shows ${shown}, not ${params.targetYear}. ${ERR.MONTH_FAILED}`
+      );
+    }
+
+    const cell = await waitFor(
+      () => {
+        const cells = monthCells(panel).filter(
+          (c) => !/disabled/i.test(c.className || '')
+        );
+        return cells.find((c) => namesMonth(c.textContent, params.targetMonth)) || null;
+      },
+      { timeout: 5000 }
+    );
+    if (!cell) throw new AppError(ERR.MONTH_FAILED);
+
+    fullClick(cell);
+    await wait(1000);
+    return true;
   }
 
   /* --- Latest Reports panel ------------------------------------------ *
@@ -1798,7 +1895,9 @@
     //
     // Both calendar flows deliberately skip selectPeriodBI — clicking the
     // period dropdown closes the picker.
-    if (params.useCalendarWeek) {
+    if (params.useCalendarMonth) {
+      await selectSpecificMonth(params);
+    } else if (params.useCalendarWeek) {
       await selectSpecificWeek(params);
     } else if (params.useCalendarDate) {
       await selectSpecificDate(params);
