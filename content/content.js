@@ -637,47 +637,97 @@
     });
   }
 
+  const MONTH_PANEL_SELECTOR =
+    '.eds-date-picker-panel, [class*="month-picker"], [class*="picker-panel"]';
+
+  /**
+   * The month panel as it is NOW. Looked up afresh every time, never held:
+   * a calendar may redraw itself when its year changes, and a held element is
+   * then a detached copy still showing the year it opened on.
+   */
+  function currentMonthPanel(fallback) {
+    return $$vis(MONTH_PANEL_SELECTOR)[0] || fallback;
+  }
+
+  /**
+   * What the month picker could see, in one line, for the error message.
+   *
+   * v1.21.0 failed on the P50 reading "2029" off a calendar that had to be
+   * showing 2026, and nothing in the report said where 2029 came from. The
+   * error lands in the diagnostics paste, so the next failure carries the
+   * evidence with it rather than needing DevTools open over a hover menu.
+   */
+  function describeMonthPanel(panel, extra) {
+    const cls = (el) => squash(el.className && el.className.baseVal != null
+      ? el.className.baseVal
+      : el.className).split(' ').filter(Boolean).slice(0, 3).join('.');
+    const panels = $$vis(MONTH_PANEL_SELECTOR).map((p) => cls(p) || p.tagName).slice(0, 4);
+    const headers = $$('[class*="header"]', panel)
+      .filter(isVisible)
+      .map((h) => `[${cls(h)}] "${squash(h.textContent).slice(0, 50)}"`)
+      .slice(0, 4);
+    const arrows = $$('[class*="prev"], [class*="next"]', panel)
+      .filter(isVisible)
+      .map(cls)
+      .slice(0, 6);
+    const cells = monthCells(panel)
+      .map((c) => `${squash(c.textContent)}${/disabled/i.test(c.className || '') ? '(x)' : ''}`)
+      .slice(0, 16);
+    return (
+      `Seen: ${extra}; panels=${JSON.stringify(panels)}; headers=${JSON.stringify(headers)}; ` +
+      `arrows=${JSON.stringify(arrows)}; cells=${JSON.stringify(cells)}`
+    );
+  }
+
   async function selectSpecificMonth(params) {
     const label = `${MONTH_NAMES[params.targetMonth - 1]} ${params.targetYear}`;
     report(`Selecting ${label} in the calendar…`);
-    const panel = await openBiCalendar(
-      /^by\s*month$/i,
-      ERR.MONTH_FAILED,
-      '.eds-date-picker-panel, [class*="month-picker"], [class*="picker-panel"]'
-    );
+    const opened = await openBiCalendar(/^by\s*month$/i, ERR.MONTH_FAILED, MONTH_PANEL_SELECTOR);
 
     // Step back to the target year. [0] is the year arrow on every Shopee
     // calendar seen so far — on the day panel [1] is the month arrow.
+    const startYear = panelYear(currentMonthPanel(opened));
     let pressed = 0;
     for (let i = 0; i < 5; i++) {
-      const shown = panelYear(panel);
+      const shown = panelYear(currentMonthPanel(opened));
       if (shown != null && shown <= params.targetYear) break;
       if (shown == null && pressed >= (params.yearsBack || 0)) break;
       const prev = $$('.eds-picker-header__prev, [class*="header"] [class*="prev"]').filter(
         isVisible
       )[0];
-      if (!prev) throw new AppError(ERR.MONTH_FAILED);
+      if (!prev) {
+        throw new AppError(
+          `${ERR.MONTH_FAILED} ${describeMonthPanel(currentMonthPanel(opened), 'no year arrow')}`
+        );
+      }
       fullClick(prev);
       pressed++;
       await wait(1000);
     }
+    const panel = currentMonthPanel(opened);
     const shown = panelYear(panel);
     if (shown != null && shown !== params.targetYear) {
       throw new AppError(
-        `The By Month calendar shows ${shown}, not ${params.targetYear}. ${ERR.MONTH_FAILED}`
+        `The By Month calendar shows ${shown}, not ${params.targetYear}. ${ERR.MONTH_FAILED} ` +
+          describeMonthPanel(panel, `opened on ${startYear}, pressed back ${pressed}x`)
       );
     }
 
     const cell = await waitFor(
       () => {
-        const cells = monthCells(panel).filter(
+        const cells = monthCells(currentMonthPanel(opened)).filter(
           (c) => !/disabled/i.test(c.className || '')
         );
         return cells.find((c) => namesMonth(c.textContent, params.targetMonth)) || null;
       },
       { timeout: 5000 }
     );
-    if (!cell) throw new AppError(ERR.MONTH_FAILED);
+    if (!cell) {
+      throw new AppError(
+        `${ERR.MONTH_FAILED} ` +
+          describeMonthPanel(currentMonthPanel(opened), `year ${shown}, no cell for month ${params.targetMonth}`)
+      );
+    }
 
     fullClick(cell);
     await wait(1000);

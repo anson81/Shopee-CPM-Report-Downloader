@@ -1,8 +1,7 @@
 {
-    "version": "1.21.0",
+    "version": "1.21.1",
     "notes": [
-        "New report #11, By Month (last month): the whole of last month, for comparing with Past 30 Days. If Shopee hands back a different month, the row says so instead of ticking green.",
-        "After each run, the Product Performance reports are sent to ProfitLens for the Campaign Planner, using the ProfitLens login already open in this browser. If you are not logged in, the files are still saved and each one gets a Push button. You can switch this off in Settings."
+        "By Month (last month) now re-reads the calendar after every press instead of trusting its first look, and if it still cannot pick the month, its error message describes what it saw - so copying diagnostics is enough to get it fixed."
     ],
     "files": [
         "README.md",
