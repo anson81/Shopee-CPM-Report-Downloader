@@ -499,6 +499,16 @@ function renderRealtime(value) {
   }
 }
 
+/**
+ * YYYY-MM-DD in the seller's own time zone. Not the ISO string: that is UTC,
+ * and before 8am in Malaysia it named the day before — so 20 Oct could not be
+ * picked on the morning of 21 Oct.
+ */
+function localYmd(d) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 async function loadExports() {
   const res = await send({ type: 'getExports' });
   exportDefs = (res && res.exports) || [];
@@ -506,7 +516,7 @@ async function loadExports() {
   // Cannot pin to today or later — there would be nothing extra to fetch.
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
-  el.realtimeDate.max = yesterday.toISOString().slice(0, 10);
+  el.realtimeDate.max = localYmd(yesterday);
   renderRealtime(res && res.realtimeDate);
   buildPicker();
 

@@ -1,8 +1,7 @@
 {
-    "version": "1.20.1",
+    "version": "1.20.2",
     "notes": [
-        "The extension now checks its own work. After saving each report it reads the file back and makes sure it actually has something in it. Before this, a report was marked done simply because saving raised no error - so a file could land with the right name in the right folder and nothing inside, and you would only find out when you opened it.",
-        "If that ever happens you now get a clear message naming the report, and the empty file is left where it is rather than quietly deleted."
+        "You can now pick yesterday in the Real Time date box first thing in the morning. Before 8am it would only go up to the day before yesterday."
     ],
     "files": [
         "README.md",
