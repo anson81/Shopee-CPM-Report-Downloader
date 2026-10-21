@@ -1,7 +1,7 @@
 {
-    "version": "1.21.1",
+    "version": "1.21.2",
     "notes": [
-        "By Month (last month) now re-reads the calendar after every press instead of trusting its first look, and if it still cannot pick the month, its error message describes what it saw - so copying diagnostics is enough to get it fixed."
+        "Catching up on a missed day: Past 7 Days now fetches the last full Monday-to-Sunday week before that day, instead of a week that had not finished yet (pinning Tue 20 Oct asked for 19-25 Oct and got a 2-day file). By Week stays the week right before it."
     ],
     "files": [
         "README.md",

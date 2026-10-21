@@ -406,9 +406,16 @@ function mondayOf(d) {
  * What Past 7 Days covers.
  *
  * Normally the rolling week ending yesterday, straight from Shopee's own
- * button. On a pinned run it becomes the Mon–Sun week containing the day
- * before the pinned day — Shopee's calendar offers a single day or a whole
- * week, never a rolling seven days for a past date.
+ * button. On a pinned run it becomes the last COMPLETE Mon–Sun week before the
+ * pinned day — Shopee's calendar offers a single day or a whole week, never a
+ * rolling seven days for a past date.
+ *
+ * Complete, and over by the day before the pin: the week ending the Sunday
+ * before the pinned day's own week (or the Sunday just gone, when the pin is a
+ * Monday). Until 1.21.2 this took the week CONTAINING the day before the pin,
+ * which reaches into the future for most weekdays: pin Tue 20 Oct 2026 and it
+ * asked for 19–25 Oct, and Shopee handed back a two-day file,
+ * parentskudetail.20261019_20261020.xlsx, labelled as a week.
  *
  * Shared so exportDates() and computeParams() cannot drift apart: one says
  * what the popup shows, the other drives the page, and a disagreement between
@@ -416,7 +423,7 @@ function mondayOf(d) {
  */
 function past7Span(now, base, pinned) {
   if (!pinned) return { from: addDays(now, -7), to: addDays(now, -1) };
-  const monday = mondayOf(addDays(base, -1));
+  const monday = addDays(mondayOf(base), -7);
   return { from: monday, to: addDays(monday, 6) };
 }
 
@@ -433,9 +440,9 @@ function exportDates(now, realtimeDate) {
   //
   // Counting a fixed two weeks back from "today" only worked while Past 7 Days
   // was a rolling window ending yesterday. On a pinned run it becomes a whole
-  // week, and two-back then skips the week in between: pin 9 Aug and Past 7
-  // Days takes 3–9 Aug while By Week jumped to 20–26 Jul, losing 27 Jul – 2 Aug
-  // altogether. Anchoring to Past 7 Days keeps the two rows adjacent — no gap,
+  // week, and two-back then skips the week in between: pin Mon 10 Aug and Past
+  // 7 Days takes 3–9 Aug while By Week jumped to 20–26 Jul, losing 27 Jul –
+  // 2 Aug altogether. Anchoring to Past 7 Days keeps the two rows adjacent — no gap,
   // and no near-duplicate either, which is what the two-week step was avoiding.
   const weekStart = addDays(mondayOf(p7.from), -7);
   const blocks = orderBlocks(now, realtimeDate);
@@ -591,7 +598,7 @@ function computeParams(ex, realtimeDate) {
   if (ex.key === 'byday_3ago') pickDay(addDays(base, -2));
 
   // Same as Yesterday: Shopee's "Past 7 Days" button is anchored to the real
-  // today, so a pinned run takes the week containing the day before instead.
+  // today, so a pinned run takes the last whole week before the pin instead.
   const p7 = past7Span(now, base, pinned);
   if (ex.key === 'past7d' && pinned) pickWeek(p7.from);
 

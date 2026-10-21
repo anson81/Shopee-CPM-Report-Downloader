@@ -90,10 +90,57 @@ test('exportDates: a pinned date moves the whole run', () => {
 
 test('exportDates: on a pinned run By Week sits immediately before Past 7 Days', () => {
   // Both are whole Mon–Sun weeks once pinned, so they butt up exactly.
+  // Fri 7 Aug: the week containing it is not over, so Past 7 Days is the one
+  // before. (Until 1.21.2 this asserted 3–9 Aug, two days past the pin.)
   const spans = D.exportDates(on(2026, 8, 11), '2026-08-07');
-  assert.equal(D.ymd(spans[4].from), '2026-08-03');
-  assert.equal(D.ymd(spans[5].to), '2026-08-02');
+  assert.equal(D.ymd(spans[4].from), '2026-07-27');
+  assert.equal(D.ymd(spans[4].to), '2026-08-02');
+  assert.equal(D.ymd(spans[5].from), '2026-07-20');
+  assert.equal(D.ymd(spans[5].to), '2026-07-26');
   assert.equal(D.ymd(D.addDays(spans[5].to, 1)), D.ymd(spans[4].from));
+});
+
+test('exportDates: pinned Tue 20 Oct 2026 takes 12–18 Oct, not the week still running', () => {
+  // The real case. The old rule took the week containing Mon 19 Oct, asked
+  // Shopee for 19–25 Oct, and got parentskudetail.20261019_20261020.xlsx.
+  const spans = D.exportDates(on(2026, 10, 21), '2026-10-20');
+  assert.equal(D.ymd(spans[4].from), '2026-10-12');
+  assert.equal(D.ymd(spans[4].to), '2026-10-18');
+  assert.equal(D.ymd(spans[5].from), '2026-10-05');
+  assert.equal(D.ymd(spans[5].to), '2026-10-11');
+});
+
+test('exportDates: pinned Monday takes the week that ended the day before', () => {
+  const spans = D.exportDates(on(2026, 10, 21), '2026-10-19');
+  assert.equal(D.ymd(spans[4].from), '2026-10-12');
+  assert.equal(D.ymd(spans[4].to), '2026-10-18');
+});
+
+test('exportDates: every pinned weekday gives whole weeks that end before the pin', () => {
+  // Two full weeks of pins, Mon 5 Oct – Sun 18 Oct 2026, so every weekday is
+  // seen in two different weeks and across the month-end-free middle.
+  for (let d = 5; d <= 18; d++) {
+    const pin = on(2026, 10, d);
+    const spans = D.exportDates(on(2026, 10, 21), D.ymd(pin));
+    const p7 = spans[4];
+    const wk = spans[5];
+    const label = `pin ${D.ymd(pin)}`;
+    assert.equal(days(p7), 7, `${label}: Past 7 Days is seven days`);
+    assert.equal(p7.from.getDay(), 1, `${label}: Past 7 Days starts on a Monday`);
+    assert.ok(p7.to <= D.addDays(pin, -1), `${label}: Past 7 Days ends by the day before the pin`);
+    // The newest complete week: the next one would reach the pin.
+    assert.ok(D.addDays(p7.to, 7) >= pin, `${label}: Past 7 Days is the newest complete week`);
+    assert.equal(days(wk), 7, `${label}: By Week is seven days`);
+    assert.equal(D.ymd(D.addDays(wk.to, 1)), D.ymd(p7.from), `${label}: By Week butts up against Past 7 Days`);
+  }
+});
+
+test('exportDates: a pinned week across a month and year boundary', () => {
+  // Fri 1 Jan 2027: the last whole week is Mon 21 – Sun 27 Dec 2026.
+  const spans = D.exportDates(on(2027, 1, 5), '2027-01-01');
+  assert.equal(D.ymd(spans[4].from), '2026-12-21');
+  assert.equal(D.ymd(spans[4].to), '2026-12-27');
+  assert.equal(D.ymd(spans[5].from), '2026-12-14');
 });
 
 test('exportDates: unpinned, By Week is a whole week ending before Past 7 Days', () => {
