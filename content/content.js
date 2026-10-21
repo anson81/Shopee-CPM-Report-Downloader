@@ -604,12 +604,21 @@
    * current year or on whichever year was last chosen, and a count is only
    * right for one of those. The count is the fallback when no year is shown.
    */
-  /** The year a month panel is showing, or null if it does not say. */
+  /**
+   * The year a month panel is showing, or null if it does not say.
+   *
+   * Read from an element whose WHOLE text is a year — Shopee's year label,
+   * `.eds-picker-header__label` — never by searching the header's text. The
+   * header holds a month label, the year and a decade label run together:
+   * "October20262020 – 2029". A search found 2029 there (the only year with a
+   * gap before it) and v1.21.0/1 failed on a calendar that was showing 2026.
+   */
   function panelYear(panel) {
-    const header =
-      $$('[class*="header"]', panel).filter(isVisible)[0] || panel;
-    const m = /\b(20\d{2})\b/.exec(squash(header.textContent));
-    return m ? Number(m[1]) : null;
+    const labels = $$('.eds-picker-header__label, [class*="header"] *', panel)
+      .filter(isVisible)
+      .map((el) => squash(el.textContent))
+      .filter((t) => /^20\d{2}$/.test(t));
+    return labels.length ? Number(labels[0]) : null;
   }
 
   /** True when a cell's own text names month `n` (1–12). */
@@ -617,8 +626,12 @@
     const t = squash(text).toLowerCase().replace(/\.$/, '');
     if (!t || t.length > 12) return false;
     if (t === String(n) || t === `${n}月` || t === pad2(n)) return true;
-    // MONTH_NAMES is the Orders calendar's list, further down this file.
-    return t.slice(0, 3) === MONTH_NAMES[n - 1].slice(0, 3).toLowerCase() && /^[a-z]+$/.test(t);
+    // The whole text must BE a month name, short or long. Matching the first
+    // three letters also matched Shopee's row elements, whose text is three
+    // months run together ("JulAugSep") — and clicking a row lands on its
+    // middle month. MONTH_NAMES is the Orders calendar's list, further down.
+    const full = MONTH_NAMES[n - 1].toLowerCase();
+    return t.length >= 3 && full.startsWith(t);
   }
 
   function pad2(n) {
@@ -684,17 +697,20 @@
     report(`Selecting ${label} in the calendar…`);
     const opened = await openBiCalendar(/^by\s*month$/i, ERR.MONTH_FAILED, MONTH_PANEL_SELECTOR);
 
-    // Step back to the target year. [0] is the year arrow on every Shopee
-    // calendar seen so far — on the day panel [1] is the month arrow.
+    // Step back to the target year, with the arrow INSIDE this calendar. The
+    // month view has one prev arrow, for the year (seen on the P50, 21 Oct
+    // 2026). Searching the whole page found some other arrow first: five
+    // presses went by with the calendar unmoved.
     const startYear = panelYear(currentMonthPanel(opened));
     let pressed = 0;
     for (let i = 0; i < 5; i++) {
       const shown = panelYear(currentMonthPanel(opened));
       if (shown != null && shown <= params.targetYear) break;
       if (shown == null && pressed >= (params.yearsBack || 0)) break;
-      const prev = $$('.eds-picker-header__prev, [class*="header"] [class*="prev"]').filter(
-        isVisible
-      )[0];
+      const prev = $$(
+        '.eds-picker-header__prev, [class*="header"] [class*="prev"]',
+        currentMonthPanel(opened)
+      ).filter(isVisible)[0];
       if (!prev) {
         throw new AppError(
           `${ERR.MONTH_FAILED} ${describeMonthPanel(currentMonthPanel(opened), 'no year arrow')}`
