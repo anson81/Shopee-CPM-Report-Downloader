@@ -538,3 +538,13 @@ footer button:hover:not(:disabled) {
   color: #777;
   word-break: break-all;
 }
+
+/* The campaign calendar line under the reports. `.push` is display:flex, which
+   would otherwise beat the hidden attribute. */
+#campaigns {
+  margin: 8px 2px 0;
+}
+
+#campaigns[hidden] {
+  display: none;
+}

@@ -2040,12 +2040,100 @@
   }
 
   /* ================================================================== *
+   * Campaign calendar
+   *
+   * Shopee's Open Platform API has no campaign calendar, so this reads the
+   * one Seller Centre's own campaign page reads: the same two same-origin JSON
+   * calls, on the seller's own session. Shapes and parameters were taken off
+   * the live page on 21 Oct 2026; lib/campaigns.js flattens and strips them.
+   *
+   * Read-only. It never opens a campaign's Nominate page — that is where
+   * products are actually joined, and joining is the seller's decision.
+   * ================================================================== */
+  function sellerApi(method, url, body) {
+    return new Promise((resolve, reject) => {
+      const x = new XMLHttpRequest();
+      x.open(method, url);
+      if (body) x.setRequestHeader('content-type', 'application/json');
+      x.onload = () => {
+        if (x.status !== 200) return reject(new Error(`${url} answered HTTP ${x.status}`));
+        try {
+          const json = JSON.parse(x.responseText);
+          if (json && json.code && json.code !== 0) {
+            return reject(new Error(json.msg || json.message || `code ${json.code}`));
+          }
+          resolve(json);
+        } catch (e) {
+          reject(new Error(`${url} did not answer JSON`));
+        }
+      };
+      x.onerror = () => reject(new Error(`${url} could not be reached`));
+      x.send(body ? JSON.stringify(body) : null);
+    });
+  }
+
+  async function captureCampaigns() {
+    const C = self.SRD_Campaigns;
+    let shop;
+    try {
+      shop = (await sellerApi('GET', '/api/selleraccount/shop_info/')).data;
+    } catch (_) {
+      return { ok: false, error: ERR.NOT_LOGGED_IN };
+    }
+    if (!shop || !shop.shop_id) return { ok: false, error: ERR.NOT_LOGGED_IN };
+
+    const raw = [];
+    for (let offset = 0; offset < 500; offset += 50) {
+      const page = await sellerApi('POST', '/api/mkt/cmt/get_landing_page_campaign_list', {
+        campaign_scene: [],
+        view_flag: 1,
+        pagination: { offset, limit: 50, sort_type: 9 },
+        sc_page: 0
+      });
+      const list = (page.data && page.data.list) || [];
+      raw.push(...list);
+      const total = page.data && page.data.pagination ? page.data.pagination.total_cnt : 0;
+      if (!list.length || raw.length >= total) break;
+    }
+
+    let sessionErrors = 0;
+    const campaigns = [];
+    for (const c of raw) {
+      const campaign = C.stripCampaign(c);
+      try {
+        // The id must go as a string: a number is answered "ERROR_PARAMS".
+        const res = await sellerApi('POST', '/api/mkt/cmt/commonscene/get_session_list', {
+          campaign_id: String(c.id)
+        });
+        campaign.sessions = C.flattenSessions(res.data);
+      } catch (_) {
+        campaign.sessions = [];
+        sessionErrors += 1;
+      }
+      campaigns.push(campaign);
+      await sleep(150); // one request at a time, gently — this is the seller's own session
+    }
+
+    return {
+      ok: true,
+      shopId: String(shop.shop_id),
+      shopName: shop.name || '',
+      region: shop.shop_region || '',
+      campaigns,
+      sessionErrors
+    };
+  }
+
+  /* ================================================================== *
    * Message router
    * ================================================================== */
   async function handle(msg) {
     switch (msg.type) {
       case 'ping':
         return { ok: true, url: window.location.href };
+
+      case 'captureCampaigns':
+        return captureCampaigns();
 
       case 'checkLogin': {
         startHeartbeat();

@@ -287,6 +287,40 @@ async function loadHistory() {
 /** Whether a run is going, for controls built inside the rows. */
 let runningNow = false;
 
+/**
+ * The campaign calendar step: one line under the reports, amber with a
+ * "Send again" button when it failed. Like a report's push, it never turns
+ * the run red — the reports are saved either way.
+ */
+function renderCampaigns(campaigns, running) {
+  const line = document.getElementById('campaigns');
+  if (!line) return;
+  line.textContent = '';
+  if (!campaigns || !campaigns.text) {
+    line.hidden = true;
+    return;
+  }
+  line.hidden = false;
+  line.className = `push ${campaigns.status || ''}`;
+  line.appendChild(Object.assign(document.createElement('span'), { textContent: campaigns.text }));
+  if (campaigns.status === 'error') {
+    const retry = Object.assign(document.createElement('button'), {
+      type: 'button',
+      className: 'push-retry',
+      textContent: 'Send again',
+      disabled: running
+    });
+    retry.addEventListener('click', async () => {
+      retry.disabled = true;
+      retry.textContent = 'Sending…';
+      const res = await send({ type: 'syncCampaigns' });
+      if (res && res.ok === false && res.error) showBanner(res.error);
+      await refresh();
+    });
+    line.appendChild(retry);
+  }
+}
+
 function render(runState, lastRun) {
   const running = !!(runState && runState.running);
   runningNow = running;
@@ -301,6 +335,7 @@ function render(runState, lastRun) {
   }
 
   buildRows(runState && runState.results);
+  renderCampaigns(runState && runState.campaigns, running);
 
   if (noFolder) {
     // Leave the folder warning standing. It is the one thing that has to be

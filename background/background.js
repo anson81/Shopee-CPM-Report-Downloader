@@ -12,13 +12,15 @@
 
 // lib/diagnostics.js builds the report the Options page copies. It is a plain
 // script attaching to self, not a module, because this worker is not one.
-importScripts('../lib/diagnostics.js');
+importScripts('../lib/diagnostics.js', '../lib/campaigns.js');
 const Diagnostics = self.SRD_Diagnostics;
+const Campaigns = self.SRD_Campaigns;
 
 const BI_URL = 'https://seller.shopee.com.my/datacenter/product/overview';
 const ADS_URL = 'https://seller.shopee.com.my/portal/marketing/pas/index';
 const ORDER_URL = 'https://seller.shopee.com.my/portal/sale/order';
 const LOGIN_URL = 'https://seller.shopee.com.my/datacenter/overview';
+const CAMPAIGN_URL = 'https://seller.shopee.com.my/portal/marketing/cmt/campaign?source=2';
 const ROOT_FOLDER = 'Shopee daily report';
 
 const EXPORTS = [
@@ -100,6 +102,8 @@ const state = {
   realtimeDate: '', // Real Time pinned to an earlier day, or '' for today
   error: '',
   results: {},
+  // The campaign calendar step after the reports: { status, text } or null.
+  campaigns: null,
   // Step-by-step trace of the Orders exports, written into the run folder as
   // orders-log.txt. The popup can only show one line per report, and a run
   // that ends with a blank row leaves nothing at all to go on — a service
@@ -134,7 +138,8 @@ function publicState() {
     finishedAt: state.finishedAt,
     currentId: state.currentId,
     error: state.error,
-    results: state.results
+    results: state.results,
+    campaigns: state.campaigns
   };
 }
 
@@ -919,9 +924,12 @@ async function waitForContentScript(tabId) {
       files: ['content/interceptor.js'],
       world: 'MAIN'
     });
+    // The same files, in the same order, as the manifest's content script —
+    // content.js leans on both libraries, and injecting it alone left it
+    // without them.
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ['content/content.js'],
+      files: ['lib/safe-name.js', 'lib/campaigns.js', 'content/content.js'],
       world: 'ISOLATED'
     });
     const res = await sendToContent(tabId, { type: 'ping' });
@@ -963,6 +971,7 @@ async function recordHistory(selected) {
     runFolder: state.runFolder,
     covers: state.realtimeDate || null, // set when Real Time was pinned
     error: state.error || '',
+    campaigns: (state.campaigns && state.campaigns.text) || '',
     reports: selected.map((ex) => {
       const result = state.results[ex.id] || {};
       return {
@@ -1536,6 +1545,76 @@ async function pushFromLastRun(id) {
   return { ok: push.status === 'done', push };
 }
 
+/* ==================================================================== *
+ * Campaign calendar → ProfitLens
+ *
+ * After the reports, the run opens Seller Centre's campaign page and reads the
+ * list of Shopee campaigns the shop can join, each with its sessions and last
+ * day to join, and sends them to ProfitLens's Campaign Planner. Shopee's API
+ * has no campaign calendar; this is the page's own data, on the seller's own
+ * session. Read-only: nothing is ever nominated.
+ *
+ * Like the report push, a failure here never fails the run.
+ * ==================================================================== */
+const CAMPAIGN_ENDPOINT = '/api/import/shopee-campaigns';
+/** Campaigns per request: Shopee's descriptions are long, ProfitLens takes 2 MB. */
+const CAMPAIGNS_PER_PUSH = 5;
+
+async function syncCampaigns() {
+  const settings = await getPushSettings();
+  if (!settings.pushToProfitLens) return null;
+
+  state.campaigns = { status: 'running', text: 'Campaigns: reading Seller Centre…' };
+  persist();
+
+  let tabId = null;
+  const session = {};
+  let result;
+  try {
+    const tab = await chrome.tabs.create({ url: CAMPAIGN_URL, active: false });
+    tabId = tab.id;
+    await awaitTabLoad(tabId);
+    await waitForContentScript(tabId);
+    const captured = await sendToContent(tabId, { type: 'captureCampaigns' });
+    if (!captured || !captured.ok) throw new Error((captured && captured.error) || 'Seller Centre did not answer');
+
+    state.campaigns = { status: 'running', text: 'Campaigns: sending to ProfitLens…' };
+    persist();
+    if (!session.tabId) Object.assign(session, await ensureProfitLensTab(settings.profitLensOrigin));
+
+    const capturedAt = new Date().toISOString();
+    let campaigns = 0;
+    let sessions = 0;
+    for (const batch of Campaigns.chunk(captured.campaigns, CAMPAIGNS_PER_PUSH)) {
+      const res = await chrome.tabs.sendMessage(session.tabId, {
+        type: 'pushJson',
+        endpoint: CAMPAIGN_ENDPOINT,
+        body: { shopId: captured.shopId, capturedAt, campaigns: batch }
+      });
+      if (!res) throw new Error('ProfitLens did not answer');
+      if (res.error) throw new Error(res.error === 'NOT_LOGGED_IN' ? 'Not logged in to ProfitLens' : res.error);
+      campaigns += res.data.campaigns || 0;
+      sessions += res.data.sessions || 0;
+    }
+    result = { campaigns, sessions, sessionErrors: captured.sessionErrors || 0 };
+  } catch (e) {
+    result = { error: (e && e.message) || String(e) };
+  } finally {
+    if (tabId != null) {
+      try {
+        await chrome.tabs.remove(tabId);
+      } catch (_) {
+        /* already gone */
+      }
+    }
+    await closePushSession(session);
+  }
+
+  state.campaigns = { status: result.error ? 'error' : 'done', text: Campaigns.summary(result) };
+  persist();
+  return state.campaigns;
+}
+
 async function runExports(ids, mode) {
   if (state.running) return { ok: false, error: 'A download run is already in progress.' };
 
@@ -1563,6 +1642,7 @@ async function runExports(ids, mode) {
   state.folder = dateFolder(day);
   state.runFolder = runFolder(day, startedAt);
   state.results = blankResults(ids);
+  state.campaigns = null;
   state.orderLog = [];
   // A stray from yesterday must not be reported against today.
   state.strays = [];
@@ -1633,6 +1713,11 @@ async function runExports(ids, mode) {
       await pushAfterRun();
     } catch (_) {
       /* a push must never sink a run whose files are already saved */
+    }
+    try {
+      await syncCampaigns();
+    } catch (_) {
+      /* nor must the campaign calendar */
     }
   }
 
@@ -1877,7 +1962,8 @@ async function handle(msg, sender) {
           // Same two lines the SiteGiant twin reports, worded the same.
           notes: [
             'ProfitLens origin: ' + push.profitLensOrigin,
-            'Push to ProfitLens: ' + (push.pushToProfitLens ? 'on' : 'off')
+            'Push to ProfitLens: ' + (push.pushToProfitLens ? 'on' : 'off'),
+            'Campaign calendar, last run: ' + (((stored.history || [])[0] || {}).campaigns || '(not sent yet)')
           ]
         })
       };
@@ -1957,6 +2043,11 @@ async function handle(msg, sender) {
 
     case 'saveFile':
       return saveFile(msg.dataUrl, msg.filename);
+
+    // The popup's "Send again" for the campaign calendar.
+    case 'syncCampaigns':
+      if (state.running) return { ok: false, error: 'Wait for the run to finish.' };
+      return { ok: true, campaigns: await syncCampaigns() };
 
     case 'pushReport':
       if (state.running) return { ok: false, error: 'Wait for the run to finish.' };

@@ -199,3 +199,27 @@ test('no ProfitLens session is reported as NOT_LOGGED_IN', async () => {
   const send = bootContentScript(async () => jsonResponse(401, { success: false, error: 'No session' }));
   assert.strictEqual((await send(PUSH)).error, 'NOT_LOGGED_IN');
 });
+
+test('pushJson sends the campaign calendar as JSON and returns what ProfitLens counted', async () => {
+  const calls = [];
+  const send = bootContentScript(async (url, opts) => {
+    calls.push({ url, opts });
+    if (url === '/api/auth/refresh') return jsonResponse(200, { data: { accessToken: 'tok' } });
+    return jsonResponse(200, { success: true, data: { campaigns: 5, sessions: 12 } });
+  });
+  const body = { shopId: '50237726', capturedAt: '2026-10-21T01:30:00.000Z', campaigns: [{ id: '1' }] };
+  const res = await send({ type: 'pushJson', endpoint: '/api/import/shopee-campaigns', body });
+  assert.strictEqual(res.ok, true);
+  assert.strictEqual(res.data.sessions, 12);
+  assert.strictEqual(calls[1].opts.headers['Content-Type'], 'application/json');
+  assert.deepStrictEqual(JSON.parse(calls[1].opts.body), body);
+});
+
+test('pushJson reports ProfitLens own words on a refusal', async () => {
+  const send = bootContentScript(async (url) => {
+    if (url === '/api/auth/refresh') return jsonResponse(200, { data: { accessToken: 'tok' } });
+    return jsonResponse(400, { success: false, error: 'Shopee shop 1 is not connected to this account.' });
+  });
+  const res = await send({ type: 'pushJson', endpoint: '/api/import/shopee-campaigns', body: {} });
+  assert.match(res.error, /not connected/);
+});

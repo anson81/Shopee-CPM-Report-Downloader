@@ -105,12 +105,29 @@
     };
   }
 
+  /** Sends a JSON body — the campaign calendar — the same way. */
+  async function pushJson({ endpoint, body }) {
+    const token = await getAccessToken();
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (res.status === 401) throw new Error('NOT_LOGGED_IN');
+    if (!res.ok) throw new Error(await readError(res));
+    const json = await res.json().catch(() => null);
+    return { ok: true, data: (json && json.data) || {} };
+  }
+
   async function handle(msg) {
     switch (msg.type) {
       case 'ping':
         return { ok: true, url: location.href };
       case 'push':
         return push(msg);
+      case 'pushJson':
+        return pushJson(msg);
       default:
         return { error: `Unknown command: ${msg.type}` };
     }

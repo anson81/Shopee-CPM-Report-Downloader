@@ -1,7 +1,7 @@
 {
-    "version": "1.21.3",
+    "version": "1.22.0",
     "notes": [
-        "By Month (last month) works now. It was reading the wrong year off Shopee's calendar (2029 instead of 2026) and refusing to pick the month."
+        "After each run, the extension now also reads Shopee's campaign list (11.11, Mid-Month, Payday, Shocking Sales...) with each campaign's last day to join, and sends it to ProfitLens's Campaign Planner. It only reads the list - it never joins anything for you."
     ],
     "files": [
         "README.md",
@@ -12,6 +12,7 @@
         "icons/icon128.png",
         "icons/icon16.png",
         "icons/icon48.png",
+        "lib/campaigns.js",
         "lib/diagnostics.js",
         "lib/safe-name.js",
         "manifest.json",
