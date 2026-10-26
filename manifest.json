@@ -48,7 +48,7 @@
     },
     {
       "matches": ["https://seller.shopee.com.my/*"],
-      "js": ["lib/safe-name.js", "lib/campaigns.js", "content/content.js"],
+      "js": ["lib/safe-name.js", "lib/campaigns.js", "lib/vouchers.js", "content/content.js"],
       "run_at": "document_start",
       "world": "ISOLATED",
       "all_frames": false

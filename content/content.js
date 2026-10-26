@@ -2125,6 +2125,49 @@
   }
 
   /* ================================================================== *
+   * CPM Voucher Hack — create product vouchers ProfitLens planned
+   *
+   * Only ever POSTs new product vouchers, one at a time, and stops at the first
+   * refusal so a wrong field cannot create four broken vouchers. Checks the
+   * shop is the one ProfitLens planned for, so a seller signed in to another
+   * shop never gets vouchers meant for this one.
+   * ================================================================== */
+  async function createVouchers(request) {
+    const V = self.SRD_Vouchers;
+    const problems = V.problems(request);
+    if (problems.length) return { ok: false, error: problems.join(' · '), results: [] };
+
+    let shop;
+    try {
+      shop = (await sellerApi('GET', '/api/selleraccount/shop_info/')).data;
+    } catch (_) {
+      return { ok: false, error: ERR.NOT_LOGGED_IN, results: [] };
+    }
+    if (!shop || !shop.shop_id) return { ok: false, error: ERR.NOT_LOGGED_IN, results: [] };
+    if (request.shopId && String(shop.shop_id) !== String(request.shopId)) {
+      return {
+        ok: false,
+        error: `Seller Centre is on ${shop.name || shop.shop_id}, not the shop these vouchers are for — switch shop and try again`,
+        results: []
+      };
+    }
+
+    const results = [];
+    for (const v of request.vouchers) {
+      try {
+        const res = await sellerApi('POST', '/api/marketing/v3/voucher/', V.payload(v, request.itemIds));
+        const id = res && res.data && (res.data.voucher_id || res.data.id);
+        results.push({ period: v.period, ok: true, voucherId: id ? String(id) : null });
+      } catch (e) {
+        results.push({ period: v.period, ok: false, error: (e && e.message) || String(e) });
+        break; // the rest would fail the same way
+      }
+      await sleep(300);
+    }
+    return { ok: results.every((r) => r.ok), shopId: String(shop.shop_id), results, summary: V.summary(results) };
+  }
+
+  /* ================================================================== *
    * Message router
    * ================================================================== */
   async function handle(msg) {
@@ -2134,6 +2177,9 @@
 
       case 'captureCampaigns':
         return captureCampaigns();
+
+      case 'createVouchers':
+        return createVouchers(msg.request);
 
       case 'checkLogin': {
         startHeartbeat();

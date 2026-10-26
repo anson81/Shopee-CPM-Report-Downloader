@@ -12,7 +12,7 @@
 
 // lib/diagnostics.js builds the report the Options page copies. It is a plain
 // script attaching to self, not a module, because this worker is not one.
-importScripts('../lib/diagnostics.js', '../lib/campaigns.js');
+importScripts('../lib/diagnostics.js', '../lib/campaigns.js', '../lib/vouchers.js');
 const Diagnostics = self.SRD_Diagnostics;
 const Campaigns = self.SRD_Campaigns;
 
@@ -929,7 +929,7 @@ async function waitForContentScript(tabId) {
     // without them.
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ['lib/safe-name.js', 'lib/campaigns.js', 'content/content.js'],
+      files: ['lib/safe-name.js', 'lib/campaigns.js', 'lib/vouchers.js', 'content/content.js'],
       world: 'ISOLATED'
     });
     const res = await sendToContent(tabId, { type: 'ping' });
@@ -1615,6 +1615,41 @@ async function syncCampaigns() {
   return state.campaigns;
 }
 
+/* ==================================================================== *
+ * CPM Voucher Hack — vouchers ProfitLens planned, created in Seller Centre
+ *
+ * ProfitLens's page asks (through content/profitlens.js) after the seller has
+ * confirmed the preview there. The request is checked again here, then a
+ * background Seller Centre tab creates the vouchers on the seller's session.
+ * ==================================================================== */
+const VOUCHER_URL = 'https://seller.shopee.com.my/portal/marketing/vouchers/list';
+
+async function createVouchers(request) {
+  const problems = self.SRD_Vouchers.problems(request);
+  if (problems.length) return { ok: false, error: problems.join(' · '), results: [] };
+
+  let tabId = null;
+  try {
+    const tab = await chrome.tabs.create({ url: VOUCHER_URL, active: false });
+    tabId = tab.id;
+    await awaitTabLoad(tabId);
+    await waitForContentScript(tabId);
+    const res = await sendToContent(tabId, { type: 'createVouchers', request });
+    if (!res) return { ok: false, error: 'Seller Centre did not answer', results: [] };
+    return res;
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || String(e), results: [] };
+  } finally {
+    if (tabId != null) {
+      try {
+        await chrome.tabs.remove(tabId);
+      } catch (_) {
+        /* already gone */
+      }
+    }
+  }
+}
+
 async function runExports(ids, mode) {
   if (state.running) return { ok: false, error: 'A download run is already in progress.' };
 
@@ -1922,6 +1957,16 @@ async function handle(msg, sender) {
           duplicateOf: dupes[e.id] || null
         }))
       };
+    }
+
+    // From ProfitLens's page, via content/profitlens.js. Only from that script:
+    // a Seller Centre page or anything else cannot ask for vouchers.
+    case 'createVouchers': {
+      const from = sender && sender.url ? sender.url : '';
+      const settings = await getPushSettings();
+      const allowed = [settings.profitLensOrigin, 'https://profitlens.my', 'http://localhost', 'http://127.0.0.1'].filter(Boolean);
+      if (!allowed.some((o) => from.startsWith(o))) return { ok: false, error: 'Vouchers can only be requested from ProfitLens' };
+      return createVouchers(msg.request);
     }
 
     case 'getHistory': {

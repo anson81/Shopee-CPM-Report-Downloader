@@ -103,8 +103,9 @@ test('any other failure keeps ProfitLens own words and offers Push', () => {
 function bootContentScript(fetchImpl) {
   let listener = null;
   const sandbox = {
-    window: {},
-    location: { href: 'https://profitlens.my/campaign-planner' },
+    // The page bridge (srd:hello, srd:createVouchers) listens on window.
+    window: { addEventListener: () => {}, postMessage: () => {} },
+    location: { href: 'https://profitlens.my/campaign-planner', origin: 'https://profitlens.my' },
     atob: (s) => Buffer.from(s, 'base64').toString('binary'),
     Uint8Array,
     Blob: class Blob {

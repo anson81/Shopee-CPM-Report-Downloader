@@ -133,6 +133,35 @@
     }
   }
 
+  /*
+   * The page bridge: ProfitLens's own page talking to the extension.
+   *
+   * window.postMessage, and only between this page and itself — a message from
+   * another window or origin is ignored. Two requests: "srd:hello" (is the
+   * extension here, which version) and "srd:createVouchers" (the CPM Voucher
+   * Hack the seller just confirmed). The background checks the request again
+   * and that it came from ProfitLens before anything reaches Seller Centre.
+   */
+  const reply = (type, requestId, body) =>
+    window.postMessage({ source: 'srd-extension', type, requestId, ...body }, location.origin);
+
+  window.addEventListener('message', (event) => {
+    if (event.source !== window || event.origin !== location.origin) return;
+    const msg = event.data;
+    if (!msg || msg.source !== 'profitlens-page' || typeof msg.type !== 'string') return;
+
+    if (msg.type === 'srd:hello') {
+      reply('srd:hello', msg.requestId, { version: chrome.runtime.getManifest().version, vouchers: true });
+      return;
+    }
+    if (msg.type === 'srd:createVouchers') {
+      chrome.runtime
+        .sendMessage({ type: 'createVouchers', request: msg.request })
+        .then((result) => reply('srd:createVouchers', msg.requestId, { result: result || { ok: false, error: 'The extension did not answer' } }))
+        .catch((err) => reply('srd:createVouchers', msg.requestId, { result: { ok: false, error: (err && err.message) || String(err) } }));
+    }
+  });
+
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!msg || !msg.type) return undefined;
     handle(msg)
