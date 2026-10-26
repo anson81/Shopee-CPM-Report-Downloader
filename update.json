@@ -1,7 +1,7 @@
 {
-    "version": "1.22.0",
+    "version": "1.23.0",
     "notes": [
-        "After each run, the extension now also reads Shopee's campaign list (11.11, Mid-Month, Payday, Shocking Sales...) with each campaign's last day to join, and sends it to ProfitLens's Campaign Planner. It only reads the list - it never joins anything for you."
+        "CPM Voucher Hack: ProfitLens's Campaign Planner can now create a product voucher series (4 vouchers, 3 days each, quantities 3-6-9-12 or 2-4-6-8) in Seller Centre for you, after you confirm the preview in ProfitLens. It only ever creates new product vouchers - it never edits, ends or deletes any voucher."
     ],
     "files": [
         "README.md",
@@ -15,6 +15,7 @@
         "lib/campaigns.js",
         "lib/diagnostics.js",
         "lib/safe-name.js",
+        "lib/vouchers.js",
         "manifest.json",
         "offscreen/offscreen.html",
         "offscreen/offscreen.js",

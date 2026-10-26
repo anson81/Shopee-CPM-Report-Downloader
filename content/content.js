@@ -2152,10 +2152,23 @@
       };
     }
 
+    // The code goes with the shop's prefix, and the form's own request carries
+    // Seller Centre's session marker in the query; both copied exactly.
+    let prefix = '';
+    try {
+      const profile = (await sellerApi('GET', '/api/marketing/v3/shop/profile/')).data;
+      prefix = V.codePrefix(profile && profile.user && profile.user.username);
+    } catch (_) {
+      /* checked below */
+    }
+    if (!prefix) return { ok: false, error: "Could not read the shop's voucher code prefix", results: [] };
+    const cds = (document.cookie.match(/(?:^|; )SPC_CDS=([^;]+)/) || [])[1];
+    const url = cds ? `/api/marketing/v3/voucher/?SPC_CDS=${encodeURIComponent(cds)}&SPC_CDS_VER=2` : '/api/marketing/v3/voucher/';
+
     const results = [];
     for (const v of request.vouchers) {
       try {
-        const res = await sellerApi('POST', '/api/marketing/v3/voucher/', V.payload(v, request.itemIds));
+        const res = await sellerApi('POST', url, V.payload(v, request.itemIds, prefix));
         const id = res && res.data && (res.data.voucher_id || res.data.id);
         results.push({ period: v.period, ok: true, voucherId: id ? String(id) : null });
       } catch (e) {

@@ -47,21 +47,40 @@ test('refuses what Seller Centre must never be sent', () => {
   assert.match(p({}), /No vouchers/);
 });
 
-test('sends a fixed-amount product voucher: no minimum spend, one per buyer, shown on all pages', () => {
-  const body = plain(V.payload(voucher(), ['27209230021']));
-  assert.strictEqual(body.name, 'A606 VC1');
-  assert.strictEqual(body.voucher_code, 'A6061');
-  assert.strictEqual(body.start_time, Date.parse('2026-10-27T16:00:00Z') / 1000);
-  assert.strictEqual(body.end_time, Date.parse('2026-10-30T15:59:00Z') / 1000);
-  assert.strictEqual(body.value, '1.00');
-  assert.strictEqual(body.discount, 0);
-  assert.strictEqual(body.min_price, '0.00');
-  assert.strictEqual(body.usage_quantity, 3);
-  assert.deepStrictEqual(body.rule.items, [{ itemid: 27209230021 }]);
-  assert.strictEqual(body.rule.usecase, 2);
-  assert.strictEqual(body.rule.usage_limit_per_user, 1);
-  assert.strictEqual(body.rule.hide, false);
-  assert.strictEqual(body.rule.display_voucher_early, true);
+test('sends what Seller Centre itself sends (captured from a real create, 26 Oct 2026)', () => {
+  const NOW_MS = Date.parse('2026-10-26T06:00:00Z');
+  const body = plain(V.payload(voucher(), ['27209230021'], 'QFMW', NOW_MS));
+  assert.deepStrictEqual(body, {
+    name: 'A606 VC1',
+    voucher_code: 'QFMWA6061',
+    start_time: Date.parse('2026-10-27T16:00:00Z') / 1000,
+    end_time: Date.parse('2026-10-30T15:59:00Z') / 1000,
+    discount: null,
+    value: 1,
+    max_value: null,
+    min_price: 0,
+    usage_quantity: 3,
+    rule: {
+      usage_limit_per_user: 1,
+      items: [{ itemid: 27209230021 }],
+      coin_cashback_voucher: { coin_percentage_real: null, max_coin: null },
+      voucher_landing_page: 1,
+      display_from: NOW_MS / 1000,
+      exclusive_channel_type: null,
+      hide: 0,
+      reward_type: 0,
+      backend_created: 0,
+      display_voucher_early: true,
+      choose_users: { shop_order_count: 0, shop_order_count_period: 0 }
+    }
+  });
+  assert.strictEqual(V.payload(voucher({ amountSen: 150 }), ['1'], 'QFMW', NOW_MS).value, 1.5);
+});
+
+test('the code prefix is the first four letters of the shop login', () => {
+  assert.strictEqual(V.codePrefix('qfmwholesales'), 'QFMW');
+  assert.strictEqual(V.codePrefix('ab_c-d9x'), 'ABCD');
+  assert.strictEqual(V.codePrefix(''), '');
 });
 
 test('says how far it got', () => {
