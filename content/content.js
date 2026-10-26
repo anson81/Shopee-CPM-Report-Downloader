@@ -2165,6 +2165,30 @@
     const cds = (document.cookie.match(/(?:^|; )SPC_CDS=([^;]+)/) || [])[1];
     const url = cds ? `/api/marketing/v3/voucher/?SPC_CDS=${encodeURIComponent(cds)}&SPC_CDS_VER=2` : '/api/marketing/v3/voucher/';
 
+    // Every code the shop already has, so a clash stops the series before the
+    // first voucher rather than after it. Read only.
+    const existing = [];
+    try {
+      const q = cds ? `SPC_CDS=${encodeURIComponent(cds)}&SPC_CDS_VER=2&` : '';
+      for (let offset = 0; offset < 5000; offset += 50) {
+        const res = await sellerApi('GET', `/api/marketing/v3/voucher/list/?${q}offset=${offset}&limit=50&promotion_type=0`);
+        const list = (res && res.data && res.data.voucher_list) || [];
+        list.forEach((x) => existing.push(x.voucher_code));
+        if (list.length < 50) break;
+      }
+    } catch (_) {
+      return { ok: false, error: "Could not read the shop's existing vouchers", results: [] };
+    }
+    const taken = V.takenCodes(existing, request.vouchers, prefix);
+    if (taken.length) {
+      return {
+        ok: false,
+        taken,
+        error: `Shopee already has ${taken.map((c) => prefix + c).join(', ')} — nothing was created`,
+        results: []
+      };
+    }
+
     const results = [];
     for (const v of request.vouchers) {
       try {

@@ -87,3 +87,9 @@ test('says how far it got', () => {
   assert.strictEqual(V.summary([{ ok: true }, { ok: true }]), '2 vouchers created');
   assert.strictEqual(V.summary([{ ok: true }, { ok: false, error: 'Code already exists' }]), '1 created, then stopped: Code already exists');
 });
+
+test('finds planned codes Shopee already has (one product, two listings)', () => {
+  const plan = [1, 2, 3, 4].map((p) => voucher({ code: `3289${p}` }));
+  assert.deepStrictEqual(V.takenCodes(['QFMW32891', 'qfmw32892', 'QFMWA6061'], plan, 'QFMW'), ['32891', '32892']);
+  assert.deepStrictEqual(V.takenCodes([], plan, 'QFMW'), []);
+});
