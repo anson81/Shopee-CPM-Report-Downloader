@@ -195,4 +195,33 @@
     }
     return origSend.apply(this, arguments);
   };
+
+  /* ------------------------------------------------------------------ *
+   * 3. Page requests for content.js — campaign nomination only.
+   *
+   * Seller Centre signs its own requests (its fetch/XHR are wrapped), and the
+   * nomination endpoints answer HTTP 403 to an unsigned one — checked 27 Oct
+   * 2026. A request from the isolated world goes out unsigned, so these few
+   * are made here, with the page's fetch as it is at call time. Only the
+   * nomination paths; anything else is refused.
+   * ------------------------------------------------------------------ */
+  const PAGE_API = /^\/api\/mkt\/cmt\/(preview\/(add|preview_list|submit_entity_online)|nominated\/edit_entity_online)(\?|$)/;
+  window.addEventListener('message', (e) => {
+    if (e.source !== window) return;
+    const d = e.data;
+    if (!d || d[TAG] !== true || d.kind !== 'pageApiRequest') return;
+    if (typeof d.url !== 'string' || !PAGE_API.test(d.url)) {
+      post({ kind: 'pageApiResult', id: d.id, status: 0, error: 'Not a nomination request' });
+      return;
+    }
+    window
+      .fetch(d.url, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(d.body || {})
+      })
+      .then(async (res) => post({ kind: 'pageApiResult', id: d.id, status: res.status, text: await res.text() }))
+      .catch((err) => post({ kind: 'pageApiResult', id: d.id, status: 0, error: String((err && err.message) || err) }));
+  });
 })();

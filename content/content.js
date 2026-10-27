@@ -67,6 +67,7 @@
    * ================================================================== */
   const TAG = '__SHOPEE_DL__';
   const captures = { blobs: [], anchors: [], links: [], apis: [] };
+  const pageApiWaiting = new Map();
 
   window.addEventListener('message', (e) => {
     if (e.source !== window) return;
@@ -85,6 +86,14 @@
       case 'api':
         captures.apis.push(d);
         break;
+      case 'pageApiResult': {
+        const waiting = pageApiWaiting.get(d.id);
+        if (waiting) {
+          pageApiWaiting.delete(d.id);
+          waiting(d);
+        }
+        break;
+      }
       default:
         break;
     }
@@ -2072,6 +2081,38 @@
     });
   }
 
+  /**
+   * A POST made by the page itself (interceptor.js), so Seller Centre signs it.
+   * The nomination endpoints refuse an unsigned request with HTTP 403.
+   */
+  function pageApi(url, body) {
+    return new Promise((resolve, reject) => {
+      const id = `p${Date.now()}${Math.random().toString(36).slice(2)}`;
+      const timer = setTimeout(() => {
+        pageApiWaiting.delete(id);
+        reject(new Error(`${url.split('?')[0]} did not answer`));
+      }, 30000);
+      pageApiWaiting.set(id, (d) => {
+        clearTimeout(timer);
+        const path = url.split('?')[0];
+        if (d.status !== 200) return reject(new Error(d.error || `${path} answered HTTP ${d.status}`));
+        let json;
+        try {
+          json = JSON.parse(d.text);
+        } catch (_) {
+          return reject(new Error(`${path} did not answer JSON`));
+        }
+        if (json && json.code && json.code !== 0) {
+          const err = new Error(json.msg || json.message || `code ${json.code}`);
+          err.code = json.code;
+          return reject(err);
+        }
+        resolve(json);
+      });
+      window.postMessage({ [TAG]: true, kind: 'pageApiRequest', id, url, body }, window.location.origin);
+    });
+  }
+
   async function captureCampaigns() {
     const C = self.SRD_Campaigns;
     let shop;
@@ -2231,8 +2272,16 @@
 
     const cds = (document.cookie.match(/(?:^|; )SPC_CDS=([^;]+)/) || [])[1];
     const at = (path) => (cds ? `${path}?SPC_CDS=${encodeURIComponent(cds)}&SPC_CDS_VER=2` : path);
-    const post = (path, body) => sellerApi('POST', at(path), body);
-    const previewList = async () => (await post('/api/mkt/cmt/preview/preview_list', { session_id: String(request.sessionId), entity_type: [2] })).data;
+    const post = (path, body) => pageApi(at(path), body);
+    // A session nothing was ever added to answers "can't get preview statics data" — nothing pending.
+    const previewList = async () => {
+      try {
+        return (await post('/api/mkt/cmt/preview/preview_list', { session_id: String(request.sessionId), entity_type: [2] })).data;
+      } catch (e) {
+        if (e && e.code === 329400010) return {};
+        throw e;
+      }
+    };
 
     // 1. Nothing else waiting — Submit would send it too.
     const wanted = new Set(request.items.map((it) => String(it.itemId)));

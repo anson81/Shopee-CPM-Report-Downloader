@@ -1,6 +1,7 @@
 {
-    "version": "1.24.0",
+    "version": "1.24.1",
     "notes": [
+        "Campaign nomination: Shopee refused it (HTTP 403) because Seller Centre signs its own requests. The nomination requests are now made by the Seller Centre page itself.",
         "Campaign nomination: ProfitLens's campaign sign-up can now nominate the ticked products in Shopee for you, at your prices and stock, after you confirm in ProfitLens. It stops if anything else is waiting in Pending Submission, or if a price is above Shopee's limit. It never withdraws or deletes a nomination.",
         "CPM Voucher Hack: checks the voucher codes against the ones your shop already has before creating anything, so a product sold on two listings no longer stops at the first voucher.",
         "CPM Voucher Hack: ProfitLens's Campaign Planner can now create a product voucher series (4 vouchers, 3 days each, quantities 3-6-9-12 or 2-4-6-8) in Seller Centre for you, after you confirm the preview in ProfitLens. It only ever creates new product vouchers - it never edits, ends or deletes any voucher."

@@ -105,3 +105,21 @@ test('submits, and opens the session page', () => {
   assert.strictEqual(N.sessionUrl(request()), 'https://seller.shopee.com.my/portal/marketing/cmt-product/campaign/2048108187/session/130000000066788');
   assert.strictEqual(N.units(2790), '2790000');
 });
+
+test('the page relays only the nomination endpoints', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'content', 'interceptor.js'), 'utf8');
+  const PAGE_API = eval(src.match(/const PAGE_API = (\/.*\/);/)[1]);
+  for (const ok of [
+    '/api/mkt/cmt/preview/add?SPC_CDS=x&SPC_CDS_VER=2',
+    '/api/mkt/cmt/preview/preview_list',
+    '/api/mkt/cmt/preview/submit_entity_online?SPC_CDS=x',
+    '/api/mkt/cmt/nominated/edit_entity_online',
+  ]) assert.ok(PAGE_API.test(ok), ok);
+  for (const no of [
+    '/api/mkt/cmt/nominated/withdraw_entity',
+    '/api/mkt/cmt/preview/delete',
+    '/api/mkt/cmt/preview/add_more',
+    'https://evil.example/api/mkt/cmt/preview/add',
+    '/api/marketing/v4/voucher/create',
+  ]) assert.ok(!PAGE_API.test(no), no);
+});
