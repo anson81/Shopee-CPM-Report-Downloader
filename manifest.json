@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Shopee Report Downloader",
-  "version": "1.24.3",
+  "version": "1.25.0",
   "description": "Download all 7 Shopee Seller Center reports with one click",
   "minimum_chrome_version": "116",
   "permissions": [
@@ -16,6 +16,7 @@
   "host_permissions": [
     "https://seller.shopee.com.my/*",
     "https://*.shopee.com.my/*",
+    "https://seller-my.tiktok.com/*",
     "https://raw.githubusercontent.com/*",
     "https://profitlens.my/*",
     "http://localhost/*",
@@ -50,6 +51,20 @@
       "matches": ["https://seller.shopee.com.my/*"],
       "js": ["lib/safe-name.js", "lib/campaigns.js", "lib/vouchers.js", "lib/nominations.js", "content/content.js"],
       "run_at": "document_start",
+      "world": "ISOLATED",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://seller-my.tiktok.com/*"],
+      "js": ["content/tiktok-interceptor.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://seller-my.tiktok.com/*"],
+      "js": ["lib/tiktok-campaigns.js", "content/tiktok.js"],
+      "run_at": "document_idle",
       "world": "ISOLATED",
       "all_frames": false
     },

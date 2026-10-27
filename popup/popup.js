@@ -292,8 +292,8 @@ let runningNow = false;
  * "Send again" button when it failed. Like a report's push, it never turns
  * the run red — the reports are saved either way.
  */
-function renderCampaigns(campaigns, running) {
-  const line = document.getElementById('campaigns');
+function renderCampaigns(campaigns, running, id = 'campaigns', retryType = 'syncCampaigns') {
+  const line = document.getElementById(id);
   if (!line) return;
   line.textContent = '';
   if (!campaigns || !campaigns.text) {
@@ -313,7 +313,7 @@ function renderCampaigns(campaigns, running) {
     retry.addEventListener('click', async () => {
       retry.disabled = true;
       retry.textContent = 'Sending…';
-      const res = await send({ type: 'syncCampaigns' });
+      const res = await send({ type: retryType });
       if (res && res.ok === false && res.error) showBanner(res.error);
       await refresh();
     });
@@ -336,6 +336,7 @@ function render(runState, lastRun) {
 
   buildRows(runState && runState.results);
   renderCampaigns(runState && runState.campaigns, running);
+  renderCampaigns(runState && runState.tiktokCampaigns, running, 'tiktok-campaigns', 'syncTikTokCampaigns');
 
   if (noFolder) {
     // Leave the folder warning standing. It is the one thing that has to be

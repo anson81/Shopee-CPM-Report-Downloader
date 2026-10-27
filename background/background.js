@@ -12,7 +12,7 @@
 
 // lib/diagnostics.js builds the report the Options page copies. It is a plain
 // script attaching to self, not a module, because this worker is not one.
-importScripts('../lib/diagnostics.js', '../lib/campaigns.js', '../lib/vouchers.js', '../lib/nominations.js');
+importScripts('../lib/diagnostics.js', '../lib/campaigns.js', '../lib/vouchers.js', '../lib/nominations.js', '../lib/tiktok-campaigns.js');
 const Diagnostics = self.SRD_Diagnostics;
 const Campaigns = self.SRD_Campaigns;
 
@@ -139,7 +139,8 @@ function publicState() {
     currentId: state.currentId,
     error: state.error,
     results: state.results,
-    campaigns: state.campaigns
+    campaigns: state.campaigns,
+    tiktokCampaigns: state.tiktokCampaigns
   };
 }
 
@@ -972,6 +973,7 @@ async function recordHistory(selected) {
     covers: state.realtimeDate || null, // set when Real Time was pinned
     error: state.error || '',
     campaigns: (state.campaigns && state.campaigns.text) || '',
+    tiktokCampaigns: (state.tiktokCampaigns && state.tiktokCampaigns.text) || '',
     reports: selected.map((ex) => {
       const result = state.results[ex.id] || {};
       return {
@@ -1616,6 +1618,98 @@ async function syncCampaigns() {
 }
 
 /* ==================================================================== *
+ * TikTok campaign list → ProfitLens
+ *
+ * The same idea for TikTok Shop: TikTok's Partner API has no list of the
+ * platform campaigns a shop may join, so a background Seller Center tab reads
+ * its own Campaigns page's list (lib/tiktok-campaigns.js). Read-only — it
+ * never registers a product or agrees to a campaign's terms.
+ *
+ * Two callers: the end of a run (pushed through a ProfitLens tab, like the
+ * Shopee calendar), and ProfitLens's own page ("Read now"), which gets the
+ * list back and sends it itself.
+ * ==================================================================== */
+const TIKTOK_CAMPAIGN_URL = 'https://seller-my.tiktok.com/promotion/campaign-tools/all?shop_region=MY';
+const TIKTOK_CAMPAIGN_ENDPOINT = '/api/import/tiktok-campaigns';
+
+async function waitForTikTokScript(tabId) {
+  const deadline = Date.now() + 30000;
+  for (;;) {
+    try {
+      const res = await sendToContent(tabId, { type: 'ping' });
+      if (res && res.ok) return;
+    } catch (_) {
+      /* not injected yet */
+    }
+    if (Date.now() > deadline) break;
+    await sleep(500);
+  }
+  // The tab predates this version: inject both worlds by hand, once.
+  await chrome.scripting.executeScript({ target: { tabId }, files: ['content/tiktok-interceptor.js'], world: 'MAIN' });
+  await chrome.scripting.executeScript({ target: { tabId }, files: ['lib/tiktok-campaigns.js', 'content/tiktok.js'], world: 'ISOLATED' });
+}
+
+/** Reads the list in a background Seller Center tab. */
+async function captureTikTokCampaigns() {
+  let tabId = null;
+  try {
+    const tab = await chrome.tabs.create({ url: TIKTOK_CAMPAIGN_URL, active: false });
+    tabId = tab.id;
+    await awaitTabLoad(tabId);
+    await waitForTikTokScript(tabId);
+    const captured = await sendToContent(tabId, { type: 'captureTikTokCampaigns' });
+    if (!captured) return { ok: false, error: 'TikTok Seller Center did not answer' };
+    return captured;
+  } catch (e) {
+    const msg = (e && e.message) || String(e);
+    return { ok: false, error: msg === ERR.NOT_LOGGED_IN ? 'Not logged in to TikTok Seller Center' : msg };
+  } finally {
+    if (tabId != null) {
+      try {
+        await chrome.tabs.remove(tabId);
+      } catch (_) {
+        /* already gone */
+      }
+    }
+  }
+}
+
+async function syncTikTokCampaigns() {
+  const settings = await getPushSettings();
+  if (!settings.pushToProfitLens) return null;
+
+  state.tiktokCampaigns = { status: 'running', text: 'TikTok campaigns: reading Seller Center…' };
+  persist();
+  const session = {};
+  let result;
+  try {
+    const captured = await captureTikTokCampaigns();
+    if (!captured.ok) throw new Error(captured.error);
+    Object.assign(session, await ensureProfitLensTab(settings.profitLensOrigin));
+    let campaigns = 0;
+    const capturedAt = new Date().toISOString();
+    for (const batch of Campaigns.chunk(captured.campaigns, CAMPAIGNS_PER_PUSH)) {
+      const res = await chrome.tabs.sendMessage(session.tabId, {
+        type: 'pushJson',
+        endpoint: TIKTOK_CAMPAIGN_ENDPOINT,
+        body: { sellerId: captured.sellerId, capturedAt, campaigns: batch }
+      });
+      if (!res) throw new Error('ProfitLens did not answer');
+      if (res.error) throw new Error(res.error === 'NOT_LOGGED_IN' ? 'Not logged in to ProfitLens' : res.error);
+      campaigns += res.data.campaigns || 0;
+    }
+    result = { campaigns };
+  } catch (e) {
+    result = { error: (e && e.message) || String(e) };
+  } finally {
+    await closePushSession(session);
+  }
+  state.tiktokCampaigns = { status: result.error ? 'error' : 'done', text: self.SRD_TikTokCampaigns.summary(result) };
+  persist();
+  return state.tiktokCampaigns;
+}
+
+/* ==================================================================== *
  * CPM Voucher Hack — vouchers ProfitLens planned, created in Seller Centre
  *
  * ProfitLens's page asks (through content/profitlens.js) after the seller has
@@ -1706,6 +1800,7 @@ async function runExports(ids, mode) {
   state.runFolder = runFolder(day, startedAt);
   state.results = blankResults(ids);
   state.campaigns = null;
+  state.tiktokCampaigns = null;
   state.orderLog = [];
   // A stray from yesterday must not be reported against today.
   state.strays = [];
@@ -1781,6 +1876,11 @@ async function runExports(ids, mode) {
       await syncCampaigns();
     } catch (_) {
       /* nor must the campaign calendar */
+    }
+    try {
+      await syncTikTokCampaigns();
+    } catch (_) {
+      /* nor TikTok's campaign list */
     }
   }
 
@@ -2006,6 +2106,16 @@ async function handle(msg, sender) {
       return nominateCampaign(msg.request);
     }
 
+    // ProfitLens's "Read now" on its TikTok campaigns page. Read-only; the
+    // page sends the list to its own API.
+    case 'readTikTokCampaigns': {
+      const from = sender && sender.url ? sender.url : '';
+      const settings = await getPushSettings();
+      const allowed = [settings.profitLensOrigin, 'https://profitlens.my', 'http://localhost', 'http://127.0.0.1'].filter(Boolean);
+      if (!allowed.some((o) => from.startsWith(o))) return { ok: false, error: 'Only ProfitLens can ask for this' };
+      return captureTikTokCampaigns();
+    }
+
     case 'getHistory': {
       const { history = [] } = await chrome.storage.local.get('history');
       return { ok: true, history };
@@ -2130,6 +2240,10 @@ async function handle(msg, sender) {
     case 'syncCampaigns':
       if (state.running) return { ok: false, error: 'Wait for the run to finish.' };
       return { ok: true, campaigns: await syncCampaigns() };
+
+    case 'syncTikTokCampaigns':
+      if (state.running) return { ok: false, error: 'Wait for the run to finish.' };
+      return { ok: true, campaigns: await syncTikTokCampaigns() };
 
     case 'pushReport':
       if (state.running) return { ok: false, error: 'Wait for the run to finish.' };
