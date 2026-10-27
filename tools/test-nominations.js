@@ -127,8 +127,8 @@ test('the page relays only the nomination endpoints', () => {
 
 // nominated_entity_list as Seller Centre answered it on 27 Oct 2026 (Nov 15 Mid-Month,
 // Kiara 1598): the edit "succeeded" but two variations kept Shopee's price and No Limit.
+// The products sit at data.recruiting_entities — no entity_list_data, unlike preview_list.
 const NOMINATED = {
-  entity_list_data: {
     recruiting_entities: [
       {
         product: {
@@ -140,7 +140,6 @@ const NOMINATED = {
         },
       },
     ],
-  },
 };
 
 test("reads the Nominated tab back and names what is not at the seller's price and stock", () => {
@@ -163,6 +162,9 @@ test("reads the Nominated tab back and names what is not at the seller's price a
   assert.deepStrictEqual(plain(N.notApplied(req, held)), [
     { itemId: '29067904151', modelId: '197984469938', name: 'Ash Grey,Free size', wantPriceSen: 2889, wantStock: 0, gotPriceSen: 3989, gotStock: 0 },
   ]);
+  // The old preview_list-shaped wrapping still reads.
+  assert.strictEqual(N.nominatedModels({ entity_list_data: NOMINATED }).size, 2);
+  assert.strictEqual(N.nominatedEntities(null).length, 0);
   // Stock 0 is Shopee's No Limit, and goes as "0".
   assert.strictEqual(N.editBody(req, new Map([['29067904151:197984469938', { nominationId: '1', maxSen: 3989 }]])).body.products[0].campaign_stock, '0');
 });
@@ -171,4 +173,28 @@ test("turns Shopee's failed_reason into readable lines, whatever its shape", () 
   assert.deepStrictEqual(plain(N.reasons(null)), []);
   assert.deepStrictEqual(plain(N.reasons('price too low')), ['price too low']);
   assert.deepStrictEqual(plain(N.reasons([{ model_name: 'Ash Grey', reason: 'overlaps another campaign' }, 'x'])), ['Ash Grey: overlaps another campaign', 'x']);
+});
+
+test('edits one variation per request — a request with several set only one (27 Oct 2026)', () => {
+  const req = {
+    sessionId: '130000000066787',
+    campaignId: '2048108187',
+    items: [{ itemId: '47265603095', models: [
+      { modelId: '446331719146', priceSen: 3989, originalPriceSen: 4990, stock: 0 },
+      { modelId: '446331719145', priceSen: 3989, originalPriceSen: 4990, stock: 0 },
+    ] }],
+  };
+  const models = new Map([
+    ['47265603095:446331719146', { nominationId: 'n1', maxSen: 4989 }],
+    ['47265603095:446331719145', { nominationId: 'n2', maxSen: 4989 }],
+  ]);
+  const { bodies, missing } = N.editBodies(req, models);
+  assert.deepStrictEqual(plain(missing), []);
+  assert.strictEqual(bodies.length, 2);
+  for (const b of bodies) {
+    assert.strictEqual(b.session_id, '130000000066787');
+    assert.strictEqual(b.entity_type, 2);
+    assert.strictEqual(b.products.length, 1);
+  }
+  assert.deepStrictEqual(plain(bodies.map((b) => b.products[0].nomination_id)), ['n1', 'n2']);
 });

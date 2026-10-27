@@ -2331,20 +2331,17 @@
     const result = (submitted && submitted.product_result) || {};
     await sleep(500);
 
-    // 5. The seller's own price and stock.
-    const { body, missing } = N.editBody(request, models);
-    let edited = { success: false, failed_reason: [] };
-    if (body.products.length) {
+    // 5. The seller's own price and stock, one variation per request (lib/nominations.js).
+    const { bodies, missing } = N.editBodies(request, models);
+    const failedReason = [];
+    for (const body of bodies) {
       try {
-        edited = (await post('/api/mkt/cmt/nominated/edit_entity_online', body)).data || edited;
+        const edited = (await post('/api/mkt/cmt/nominated/edit_entity_online', body)).data || {};
+        failedReason.push(...N.reasons(edited.failed_reason));
       } catch (e) {
-        return {
-          ok: false,
-          step: 'edit',
-          submitted: result,
-          error: `Nominated at Shopee's suggested price, but setting your prices failed: ${(e && e.message) || e}. Edit them in Seller Centre.`,
-        };
+        failedReason.push(`${body.products[0].model_id}: ${(e && e.message) || e}`);
       }
+      await sleep(250);
     }
     // 6. What the Nominated tab now holds — the edit's own "success" is not enough.
     await sleep(800);
@@ -2356,7 +2353,7 @@
         const data = (await post('/api/mkt/cmt/nominated/nominated_entity_list', N.nominatedListBody(request, page))).data;
         const got = N.nominatedModels(data);
         got.forEach((v, k) => wantedItems.has(k.split(':')[0]) && held.set(k, v));
-        const count = ((data && data.entity_list_data && data.entity_list_data.recruiting_entities) || []).length;
+        const count = N.nominatedEntities(data).length;
         if (count < 10) break;
         await sleep(200);
       }
@@ -2370,11 +2367,11 @@
       ok,
       step: 'done',
       submitted: { items: result.success_item_num || 0, models: result.success_model_num || 0, failedModels: result.failed_model_num || 0 },
-      priced: body.products.length,
+      priced: bodies.length,
       missing,
       notApplied: wrong,
       readBack,
-      failedReasons: N.reasons(edited.failed_reason),
+      failedReasons: failedReason,
       summary: ok
         ? `${result.success_item_num || 0} product(s), ${total} variation(s) nominated at your prices and stock`
         : !readBack
