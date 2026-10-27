@@ -12,7 +12,7 @@
 
 // lib/diagnostics.js builds the report the Options page copies. It is a plain
 // script attaching to self, not a module, because this worker is not one.
-importScripts('../lib/diagnostics.js', '../lib/campaigns.js', '../lib/vouchers.js');
+importScripts('../lib/diagnostics.js', '../lib/campaigns.js', '../lib/vouchers.js', '../lib/nominations.js');
 const Diagnostics = self.SRD_Diagnostics;
 const Campaigns = self.SRD_Campaigns;
 
@@ -929,7 +929,7 @@ async function waitForContentScript(tabId) {
     // without them.
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ['lib/safe-name.js', 'lib/campaigns.js', 'lib/vouchers.js', 'content/content.js'],
+      files: ['lib/safe-name.js', 'lib/campaigns.js', 'lib/vouchers.js', 'lib/nominations.js', 'content/content.js'],
       world: 'ISOLATED'
     });
     const res = await sendToContent(tabId, { type: 'ping' });
@@ -1650,6 +1650,34 @@ async function createVouchers(request) {
   }
 }
 
+/* Campaign nomination: Seller Centre's session page, in the background, does
+ * the four steps of lib/nominations.js. */
+async function nominateCampaign(request) {
+  const problems = self.SRD_Nominations.problems(request);
+  if (problems.length) return { ok: false, step: 'check', error: problems.join(' · ') };
+
+  let tabId = null;
+  try {
+    const tab = await chrome.tabs.create({ url: self.SRD_Nominations.sessionUrl(request), active: false });
+    tabId = tab.id;
+    await awaitTabLoad(tabId);
+    await waitForContentScript(tabId);
+    const res = await sendToContent(tabId, { type: 'nominateCampaign', request });
+    if (!res) return { ok: false, step: 'check', error: 'Seller Centre did not answer' };
+    return res;
+  } catch (e) {
+    return { ok: false, step: 'check', error: (e && e.message) || String(e) };
+  } finally {
+    if (tabId != null) {
+      try {
+        await chrome.tabs.remove(tabId);
+      } catch (_) {
+        /* already gone */
+      }
+    }
+  }
+}
+
 async function runExports(ids, mode) {
   if (state.running) return { ok: false, error: 'A download run is already in progress.' };
 
@@ -1967,6 +1995,15 @@ async function handle(msg, sender) {
       const allowed = [settings.profitLensOrigin, 'https://profitlens.my', 'http://localhost', 'http://127.0.0.1'].filter(Boolean);
       if (!allowed.some((o) => from.startsWith(o))) return { ok: false, error: 'Vouchers can only be requested from ProfitLens' };
       return createVouchers(msg.request);
+    }
+
+    // Same rule: only ProfitLens's own page may ask.
+    case 'nominateCampaign': {
+      const from = sender && sender.url ? sender.url : '';
+      const settings = await getPushSettings();
+      const allowed = [settings.profitLensOrigin, 'https://profitlens.my', 'http://localhost', 'http://127.0.0.1'].filter(Boolean);
+      if (!allowed.some((o) => from.startsWith(o))) return { ok: false, step: 'check', error: 'Nominations can only be requested from ProfitLens' };
+      return nominateCampaign(msg.request);
     }
 
     case 'getHistory': {

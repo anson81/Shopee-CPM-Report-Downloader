@@ -2205,6 +2205,111 @@
   }
 
   /* ================================================================== *
+   * Campaign nomination — the products ProfitLens priced for a session
+   *
+   * Seller Centre's own four requests, in its own order (lib/nominations.js).
+   * Refuses to start while anything else is in Pending Submission: Submit
+   * sends all of it, and nothing the seller did not ask for may go with it.
+   * Stops before submitting if a price is above Shopee's highest allowed
+   * price — the products then wait in Pending Submission for a new price.
+   * ================================================================== */
+  async function nominateCampaign(request) {
+    const N = self.SRD_Nominations;
+    const problems = N.problems(request);
+    if (problems.length) return { ok: false, step: 'check', error: problems.join(' · ') };
+
+    let shop;
+    try {
+      shop = (await sellerApi('GET', '/api/selleraccount/shop_info/')).data;
+    } catch (_) {
+      return { ok: false, step: 'check', error: ERR.NOT_LOGGED_IN };
+    }
+    if (!shop || !shop.shop_id) return { ok: false, step: 'check', error: ERR.NOT_LOGGED_IN };
+    if (request.shopId && String(shop.shop_id) !== String(request.shopId)) {
+      return { ok: false, step: 'check', error: `Seller Centre is on ${shop.name || shop.shop_id}, not the shop these products are in — switch shop and try again` };
+    }
+
+    const cds = (document.cookie.match(/(?:^|; )SPC_CDS=([^;]+)/) || [])[1];
+    const at = (path) => (cds ? `${path}?SPC_CDS=${encodeURIComponent(cds)}&SPC_CDS_VER=2` : path);
+    const post = (path, body) => sellerApi('POST', at(path), body);
+    const previewList = async () => (await post('/api/mkt/cmt/preview/preview_list', { session_id: String(request.sessionId), entity_type: [2] })).data;
+
+    // 1. Nothing else waiting — Submit would send it too.
+    const wanted = new Set(request.items.map((it) => String(it.itemId)));
+    let pending;
+    try {
+      pending = N.pendingItems(await previewList());
+    } catch (e) {
+      return { ok: false, step: 'check', error: `Could not read Pending Submission: ${(e && e.message) || e}` };
+    }
+    const others = pending.filter((id) => !wanted.has(id));
+    if (others.length) {
+      return { ok: false, step: 'check', error: `${others.length} other product(s) are waiting in Pending Submission for this session. Submit or delete them in Seller Centre first — Submit would send them too.` };
+    }
+
+    // 2. Into Pending Submission (those not already there from an earlier try).
+    const toAdd = request.items.filter((it) => !pending.includes(String(it.itemId)));
+    if (toAdd.length) {
+      try {
+        const res = await post('/api/mkt/cmt/preview/add', N.addBody({ ...request, items: toAdd }));
+        const failed = (res && res.data && res.data.product_failed_num) || 0;
+        if (failed) return { ok: false, step: 'add', error: `Shopee would not take ${failed} of the products for this session (not eligible) — nothing was submitted` };
+      } catch (e) {
+        return { ok: false, step: 'add', error: `Shopee refused to add them: ${(e && e.message) || e}` };
+      }
+      await sleep(300);
+    }
+
+    // 3. Read back each nomination id and Shopee's highest allowed price.
+    let models;
+    try {
+      models = N.pendingModels(await previewList());
+    } catch (e) {
+      return { ok: false, step: 'add', error: `Could not read Pending Submission back: ${(e && e.message) || e}` };
+    }
+    const over = N.overMax(request, models);
+    if (over.length) {
+      return { ok: false, step: 'price', overMax: over, error: `${over.length} price(s) are above Shopee's highest allowed price for this session. Nothing was submitted; the products wait in Pending Submission.` };
+    }
+
+    // 4. Submit.
+    let submitted;
+    try {
+      submitted = (await post('/api/mkt/cmt/preview/submit_entity_online', N.submitBody(request))).data;
+    } catch (e) {
+      return { ok: false, step: 'submit', error: `Shopee refused the submission: ${(e && e.message) || e}` };
+    }
+    const result = (submitted && submitted.product_result) || {};
+    await sleep(500);
+
+    // 5. The seller's own price and stock.
+    const { body, missing } = N.editBody(request, models);
+    let edited = { success: false, failed_reason: [] };
+    if (body.products.length) {
+      try {
+        edited = (await post('/api/mkt/cmt/nominated/edit_entity_online', body)).data || edited;
+      } catch (e) {
+        return {
+          ok: false,
+          step: 'edit',
+          submitted: result,
+          error: `Nominated at Shopee's suggested price, but setting your prices failed: ${(e && e.message) || e}. Edit them in Seller Centre.`,
+        };
+      }
+    }
+    const ok = !!edited.success && missing.length === 0 && !result.failed_model_num;
+    return {
+      ok,
+      step: 'done',
+      submitted: { items: result.success_item_num || 0, models: result.success_model_num || 0, failedModels: result.failed_model_num || 0 },
+      priced: body.products.length,
+      missing,
+      failedReasons: edited.failed_reason || [],
+      summary: `${result.success_item_num || 0} product(s), ${result.success_model_num || 0} variation(s) nominated${ok ? ' at your prices' : ''}`,
+    };
+  }
+
+  /* ================================================================== *
    * Message router
    * ================================================================== */
   async function handle(msg) {
@@ -2217,6 +2322,9 @@
 
       case 'createVouchers':
         return createVouchers(msg.request);
+
+      case 'nominateCampaign':
+        return nominateCampaign(msg.request);
 
       case 'checkLogin': {
         startHeartbeat();
