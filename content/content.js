@@ -2346,15 +2346,41 @@
         };
       }
     }
-    const ok = !!edited.success && missing.length === 0 && !result.failed_model_num;
+    // 6. What the Nominated tab now holds — the edit's own "success" is not enough.
+    await sleep(800);
+    const wantedItems = new Set(request.items.map((it) => String(it.itemId)));
+    const held = new Map();
+    let readBack = true;
+    try {
+      for (let page = 1; page <= 50; page++) {
+        const data = (await post('/api/mkt/cmt/nominated/nominated_entity_list', N.nominatedListBody(request, page))).data;
+        const got = N.nominatedModels(data);
+        got.forEach((v, k) => wantedItems.has(k.split(':')[0]) && held.set(k, v));
+        const count = ((data && data.entity_list_data && data.entity_list_data.recruiting_entities) || []).length;
+        if (count < 10) break;
+        await sleep(200);
+      }
+    } catch (_) {
+      readBack = false;
+    }
+    const wrong = readBack ? N.notApplied(request, held) : [];
+    const ok = readBack && wrong.length === 0 && !result.failed_model_num;
+    const total = request.items.reduce((n, it) => n + it.models.length, 0);
     return {
       ok,
       step: 'done',
       submitted: { items: result.success_item_num || 0, models: result.success_model_num || 0, failedModels: result.failed_model_num || 0 },
       priced: body.products.length,
       missing,
-      failedReasons: edited.failed_reason || [],
-      summary: `${result.success_item_num || 0} product(s), ${result.success_model_num || 0} variation(s) nominated${ok ? ' at your prices' : ''}`,
+      notApplied: wrong,
+      readBack,
+      failedReasons: N.reasons(edited.failed_reason),
+      summary: ok
+        ? `${result.success_item_num || 0} product(s), ${total} variation(s) nominated at your prices and stock`
+        : !readBack
+          ? `Nominated, but the Nominated tab could not be read back — check the prices and stock in Seller Centre`
+          : `Nominated, but ${wrong.length} of ${total} variation(s) are not at your price or stock in Seller Centre`,
+      error: ok ? undefined : 'Nominated — but not all at your prices. See below.',
     };
   }
 

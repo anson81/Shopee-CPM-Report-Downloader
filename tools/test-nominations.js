@@ -114,6 +114,7 @@ test('the page relays only the nomination endpoints', () => {
     '/api/mkt/cmt/preview/preview_list',
     '/api/mkt/cmt/preview/submit_entity_online?SPC_CDS=x',
     '/api/mkt/cmt/nominated/edit_entity_online',
+    '/api/mkt/cmt/nominated/nominated_entity_list?SPC_CDS=x',
   ]) assert.ok(PAGE_API.test(ok), ok);
   for (const no of [
     '/api/mkt/cmt/nominated/withdraw_entity',
@@ -122,4 +123,52 @@ test('the page relays only the nomination endpoints', () => {
     'https://evil.example/api/mkt/cmt/preview/add',
     '/api/marketing/v4/voucher/create',
   ]) assert.ok(!PAGE_API.test(no), no);
+});
+
+// nominated_entity_list as Seller Centre answered it on 27 Oct 2026 (Nov 15 Mid-Month,
+// Kiara 1598): the edit "succeeded" but two variations kept Shopee's price and No Limit.
+const NOMINATED = {
+  entity_list_data: {
+    recruiting_entities: [
+      {
+        product: {
+          item_id: '29067904151',
+          models: [
+            { item_id: '29067904151', model_id: '197984469939', model_name: 'Ash Brown,Free size', campaign_price: '2889000', campaign_stock: '6', reserved_stock: 0 },
+            { item_id: '29067904151', model_id: '197984469938', model_name: 'Ash Grey,Free size', campaign_price: '3989000', campaign_stock: '0', reserved_stock: 0 },
+          ],
+        },
+      },
+    ],
+  },
+};
+
+test("reads the Nominated tab back and names what is not at the seller's price and stock", () => {
+  const req = {
+    sessionId: '130000000066787',
+    campaignId: '2048108187',
+    items: [
+      {
+        itemId: '29067904151',
+        models: [
+          { modelId: '197984469939', priceSen: 2889, originalPriceSen: 3990, stock: 6 },
+          { modelId: '197984469938', priceSen: 2889, originalPriceSen: 3990, stock: 0 },
+        ],
+      },
+    ],
+  };
+  assert.deepStrictEqual(plain(N.nominatedListBody(req, 2)), { session_id: '130000000066787', entity_type: [2], entity_tab: 0, page_num: 2, page_size: 10 });
+  const held = N.nominatedModels(NOMINATED);
+  assert.deepStrictEqual(plain(held.get('29067904151:197984469938')), { name: 'Ash Grey,Free size', priceSen: 3989, stock: 0 });
+  assert.deepStrictEqual(plain(N.notApplied(req, held)), [
+    { itemId: '29067904151', modelId: '197984469938', name: 'Ash Grey,Free size', wantPriceSen: 2889, wantStock: 0, gotPriceSen: 3989, gotStock: 0 },
+  ]);
+  // Stock 0 is Shopee's No Limit, and goes as "0".
+  assert.strictEqual(N.editBody(req, new Map([['29067904151:197984469938', { nominationId: '1', maxSen: 3989 }]])).body.products[0].campaign_stock, '0');
+});
+
+test("turns Shopee's failed_reason into readable lines, whatever its shape", () => {
+  assert.deepStrictEqual(plain(N.reasons(null)), []);
+  assert.deepStrictEqual(plain(N.reasons('price too low')), ['price too low']);
+  assert.deepStrictEqual(plain(N.reasons([{ model_name: 'Ash Grey', reason: 'overlaps another campaign' }, 'x'])), ['Ash Grey: overlaps another campaign', 'x']);
 });

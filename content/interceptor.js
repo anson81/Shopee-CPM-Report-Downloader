@@ -205,7 +205,7 @@
    * are made here, with the page's fetch as it is at call time. Only the
    * nomination paths; anything else is refused.
    * ------------------------------------------------------------------ */
-  const PAGE_API = /^\/api\/mkt\/cmt\/(preview\/(add|preview_list|submit_entity_online)|nominated\/edit_entity_online)(\?|$)/;
+  const PAGE_API = /^\/api\/mkt\/cmt\/(preview\/(add|preview_list|submit_entity_online)|nominated\/(edit_entity_online|nominated_entity_list))(\?|$)/;
   window.addEventListener('message', (e) => {
     if (e.source !== window) return;
     const d = e.data;

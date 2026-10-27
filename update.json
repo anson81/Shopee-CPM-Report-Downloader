@@ -1,6 +1,7 @@
 {
-    "version": "1.24.1",
+    "version": "1.24.2",
     "notes": [
+        "Campaign nomination: after setting your prices, reads Shopee's Nominated tab back and says exactly which variations are not at your price or stock, instead of reporting done. Campaign stock 0 means Shopee's No Limit (nothing set aside).",
         "Campaign nomination: Shopee refused it (HTTP 403) because Seller Centre signs its own requests. The nomination requests are now made by the Seller Centre page itself.",
         "Campaign nomination: ProfitLens's campaign sign-up can now nominate the ticked products in Shopee for you, at your prices and stock, after you confirm in ProfitLens. It stops if anything else is waiting in Pending Submission, or if a price is above Shopee's limit. It never withdraws or deletes a nomination.",
         "CPM Voucher Hack: checks the voucher codes against the ones your shop already has before creating anything, so a product sold on two listings no longer stops at the first voucher.",
