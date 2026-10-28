@@ -151,7 +151,16 @@
     if (!msg || msg.source !== 'profitlens-page' || typeof msg.type !== 'string') return;
 
     if (msg.type === 'srd:hello') {
-      reply('srd:hello', msg.requestId, { version: chrome.runtime.getManifest().version, vouchers: true, nominations: true, tiktokCampaigns: true });
+      reply('srd:hello', msg.requestId, {
+        version: chrome.runtime.getManifest().version, vouchers: true, nominations: true, tiktokCampaigns: true, verifyNominations: true,
+      });
+      return;
+    }
+    if (msg.type === 'srd:verifyNomination') {
+      chrome.runtime
+        .sendMessage({ type: 'verifyNomination', request: msg.request })
+        .then((result) => reply('srd:verifyNomination', msg.requestId, { result: result || { ok: false, error: 'The extension did not answer' } }))
+        .catch((err) => reply('srd:verifyNomination', msg.requestId, { result: { ok: false, error: (err && err.message) || String(err) } }));
       return;
     }
     if (msg.type === 'srd:nominateCampaign') {

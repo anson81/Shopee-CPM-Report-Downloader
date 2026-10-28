@@ -203,9 +203,10 @@
    * nomination endpoints answer HTTP 403 to an unsigned one — checked 27 Oct
    * 2026. A request from the isolated world goes out unsigned, so these few
    * are made here, with the page's fetch as it is at call time. Only the
-   * nomination paths; anything else is refused.
+   * nomination paths, and the read-only eligibility check Add Products makes
+   * (selector/verify, 28 Oct 2026); anything else is refused.
    * ------------------------------------------------------------------ */
-  const PAGE_API = /^\/api\/mkt\/cmt\/(preview\/(add|preview_list|submit_entity_online)|nominated\/(edit_entity_online|nominated_entity_list))(\?|$)/;
+  const PAGE_API = /^\/api\/mkt\/cmt\/(preview\/(add|preview_list|submit_entity_online)|nominated\/(edit_entity_online|nominated_entity_list)|product\/online\/selector\/verify)(\?|$)/;
   window.addEventListener('message', (e) => {
     if (e.source !== window) return;
     const d = e.data;

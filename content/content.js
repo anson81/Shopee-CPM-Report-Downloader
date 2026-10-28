@@ -2254,6 +2254,39 @@
    * Stops before submitting if a price is above Shopee's highest allowed
    * price — the products then wait in Pending Submission for a new price.
    * ================================================================== */
+  /**
+   * Which variations Shopee would take for the session — the check Add
+   * Products makes (selector/verify), so ProfitLens can say before Nominate.
+   * Read-only: it selects and adds nothing.
+   */
+  async function verifyNomination(request) {
+    const N = self.SRD_Nominations;
+    const ids = [...new Set((request.items || []).map((it) => String(it.itemId)))];
+    if (!request.sessionId || ids.length === 0) return { ok: false, error: 'Nothing to check' };
+    let shop;
+    try {
+      shop = (await sellerApi('GET', '/api/selleraccount/shop_info/')).data;
+    } catch (_) {
+      return { ok: false, error: ERR.NOT_LOGGED_IN };
+    }
+    if (!shop || !shop.shop_id) return { ok: false, error: ERR.NOT_LOGGED_IN };
+    if (request.shopId && String(shop.shop_id) !== String(request.shopId)) {
+      return { ok: false, error: `Seller Centre is on ${shop.name || shop.shop_id}, not the shop these products are in` };
+    }
+    const cds = (document.cookie.match(/(?:^|; )SPC_CDS=([^;]+)/) || [])[1];
+    const at = (path) => (cds ? `${path}?SPC_CDS=${encodeURIComponent(cds)}&SPC_CDS_VER=2` : path);
+    const models = {};
+    try {
+      for (let i = 0; i < ids.length; i += N.VERIFY_PAGE) {
+        const res = await pageApi(at('/api/mkt/cmt/product/online/selector/verify'), N.verifyBody(request.sessionId, ids.slice(i, i + N.VERIFY_PAGE)));
+        Object.assign(models, N.verifyResults(res && res.data));
+      }
+    } catch (e) {
+      return { ok: false, error: `Shopee's check did not answer: ${(e && e.message) || e}` };
+    }
+    return { ok: true, models };
+  }
+
   async function nominateCampaign(request) {
     const N = self.SRD_Nominations;
     const problems = N.problems(request);
@@ -2405,6 +2438,8 @@
 
       case 'nominateCampaign':
         return nominateCampaign(msg.request);
+      case 'verifyNomination':
+        return verifyNomination(msg.request);
 
       case 'checkLogin': {
         startHeartbeat();

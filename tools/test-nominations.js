@@ -207,3 +207,30 @@ test("names why preview/add refused products, in Shopee's words, or shows what i
   // No list: what Shopee did send, so the shape can be learnt.
   assert.match(N.addFailures({ product_failed_num: 6 })[0], /^Shopee gave no reason\. Its answer: \{"product_failed_num":6\}/);
 });
+
+// selector/verify as Seller Centre answered it on 28 Oct 2026 (trimmed to the fields used).
+test("reads Add Products' eligibility check: which variations Shopee takes, and why not in plain words", () => {
+  assert.deepStrictEqual(plain(N.verifyBody('130000000066787', [123, '456'])), { session_id: '130000000066787', item_ids: ['123', '456'] });
+  const data = {
+    verified_products: [
+      { item_id: '1', item_name: 'Verlin', verified_models: [{ model: { item_id: '1', model_id: '11' }, check_result: 0, err_msg: '', err_code: null }] },
+      {
+        item_id: '2',
+        item_name: 'Inasya',
+        verified_models: [
+          { model: { item_id: '2', model_id: '21' }, check_result: 1, err_msg: 'Product has been selected', err_code: 2 },
+          { model: { item_id: '2', model_id: '22' }, check_result: 1, err_msg: "The model's current stock should be >=0", err_code: null },
+          { model: { item_id: '2', model_id: '23' }, check_result: 1, err_msg: 'Product has been nominated', err_code: 1 },
+          { model: { item_id: '2', model_id: '24' }, check_result: 1, err_msg: 'Something new', err_code: 9 },
+        ],
+      },
+    ],
+  };
+  const r = N.verifyResults(data);
+  assert.deepStrictEqual(plain(r['1:11']), { ok: true, reason: '', shopee: '' });
+  assert.match(r['2:21'].reason, /^Already in Pending Submission/);
+  assert.equal(r['2:22'].reason, 'Out of stock');
+  assert.equal(r['2:23'].reason, 'Already nominated in this session');
+  assert.equal(r['2:24'].reason, 'Something new');
+  assert.deepStrictEqual(plain(N.verifyResults(null)), {});
+});

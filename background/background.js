@@ -1749,14 +1749,26 @@ async function createVouchers(request) {
 async function nominateCampaign(request) {
   const problems = self.SRD_Nominations.problems(request);
   if (problems.length) return { ok: false, step: 'check', error: problems.join(' · ') };
+  return inSessionTab(request, 'nominateCampaign');
+}
 
+/* Which variations Shopee would take for a session — Add Products' own
+ * check, read-only, run on the session page like a nomination. */
+async function verifyNomination(request) {
+  if (!request || !request.sessionId || !request.campaignId) return { ok: false, error: 'No session to check' };
+  return inSessionTab(request, 'verifyNomination');
+}
+
+/* Seller Centre's session page in a background tab, one message to it, and
+ * the tab closed whatever happened. */
+async function inSessionTab(request, type) {
   let tabId = null;
   try {
     const tab = await chrome.tabs.create({ url: self.SRD_Nominations.sessionUrl(request), active: false });
     tabId = tab.id;
     await awaitTabLoad(tabId);
     await waitForContentScript(tabId);
-    const res = await sendToContent(tabId, { type: 'nominateCampaign', request });
+    const res = await sendToContent(tabId, { type, request });
     if (!res) return { ok: false, step: 'check', error: 'Seller Centre did not answer' };
     return res;
   } catch (e) {
@@ -2104,6 +2116,13 @@ async function handle(msg, sender) {
       const allowed = [settings.profitLensOrigin, 'https://profitlens.my', 'http://localhost', 'http://127.0.0.1'].filter(Boolean);
       if (!allowed.some((o) => from.startsWith(o))) return { ok: false, step: 'check', error: 'Nominations can only be requested from ProfitLens' };
       return nominateCampaign(msg.request);
+    }
+    case 'verifyNomination': {
+      const from = sender && sender.url ? sender.url : '';
+      const settings = await getPushSettings();
+      const allowed = [settings.profitLensOrigin, 'https://profitlens.my', 'http://localhost', 'http://127.0.0.1'].filter(Boolean);
+      if (!allowed.some((o) => from.startsWith(o))) return { ok: false, error: 'Checks can only be requested from ProfitLens' };
+      return verifyNomination(msg.request);
     }
 
     // ProfitLens's "Read now" on its TikTok campaigns page. Read-only; the
