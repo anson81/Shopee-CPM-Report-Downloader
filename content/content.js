@@ -2302,7 +2302,15 @@
       try {
         const res = await post('/api/mkt/cmt/preview/add', N.addBody({ ...request, items: toAdd }));
         const failed = (res && res.data && res.data.product_failed_num) || 0;
-        if (failed) return { ok: false, step: 'add', error: `Shopee would not take ${failed} of the products for this session (not eligible) — nothing was submitted` };
+        if (failed) {
+          // Shopee's own reasons, not a guess (until 1.25.1 this said "not eligible").
+          return {
+            ok: false,
+            step: 'add',
+            error: `Shopee would not take ${failed} of them for this session — nothing was submitted. Any it took wait in Pending Submission; untick the refused ones and try again, or delete them there.`,
+            failedReasons: N.addFailures(res.data),
+          };
+        }
       } catch (e) {
         return { ok: false, step: 'add', error: `Shopee refused to add them: ${(e && e.message) || e}` };
       }

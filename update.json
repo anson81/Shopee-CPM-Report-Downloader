@@ -1,6 +1,7 @@
 {
-    "version": "1.25.0",
+    "version": "1.25.1",
     "notes": [
+        "Campaign nomination: when Shopee will not take some products for a session, says why in Shopee's own words (it used to say only \"not eligible\", which was a guess).",
         "TikTok campaigns: reads the campaigns your TikTok shop can register for (TikTok Seller Center → Campaigns) and sends them to ProfitLens, after each run and when you press Read now in ProfitLens. Read-only: it never registers a product or accepts a campaign's terms. Chrome now also needs to open seller-my.tiktok.com.",
         "Campaign nomination: your price is now set one variation at a time - Shopee was taking only one variation per product and leaving the rest at its own price. The check afterwards also read the wrong part of Shopee's answer and said \"Shopee has nothing\" for variations that were nominated; it now reads them correctly.",
         "Campaign nomination: after setting your prices, reads Shopee's Nominated tab back and says exactly which variations are not at your price or stock, instead of reporting done. Campaign stock 0 means Shopee's No Limit (nothing set aside).",

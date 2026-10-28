@@ -198,3 +198,12 @@ test('edits one variation per request — a request with several set only one (2
   }
   assert.deepStrictEqual(plain(bodies.map((b) => b.products[0].nomination_id)), ['n1', 'n2']);
 });
+
+test("names why preview/add refused products, in Shopee's words, or shows what it sent", () => {
+  const data = { product_failed_num: 1, failed_list: [{ item_id: 29170883453, reason: 'Item stock is less than required' }] };
+  assert.deepStrictEqual(Array.from(N.addFailures(data)), ['29170883453: Item stock is less than required']);
+  // Nested a level down, under any key naming failure.
+  assert.deepStrictEqual(Array.from(N.addFailures({ result: { invalid_items: [{ item_name: 'Inasya Top', err_msg: 'Not eligible' }] } })), ['Inasya Top: Not eligible']);
+  // No list: what Shopee did send, so the shape can be learnt.
+  assert.match(N.addFailures({ product_failed_num: 6 })[0], /^Shopee gave no reason\. Its answer: \{"product_failed_num":6\}/);
+});
