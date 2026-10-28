@@ -1,8 +1,9 @@
 /**
  * TikTok Seller Center — ISOLATED world.
  *
- * Reads the campaign list (lib/tiktok-campaigns.js) through the page relay in
- * content/tiktok-interceptor.js and hands it to the service worker. Read-only.
+ * Reads the campaign list (lib/tiktok-campaigns.js), then each sub-campaign's
+ * price rules, through the page relay in content/tiktok-interceptor.js and
+ * hands them to the service worker. Read-only.
  */
 (() => {
   'use strict';
@@ -25,7 +26,7 @@
     }
   });
 
-  function pageApi(url, body) {
+  function pageApi(url, body, method = 'POST') {
     return new Promise((resolve, reject) => {
       const id = `t${Date.now()}${Math.random().toString(36).slice(2)}`;
       const timer = setTimeout(() => {
@@ -44,7 +45,7 @@
         if (json && json.code) return reject(new Error(json.message || json.msg || `code ${json.code}`));
         resolve(json);
       });
-      window.postMessage({ [TAG]: true, kind: 'pageApiRequest', id, url, body }, window.location.origin);
+      window.postMessage({ [TAG]: true, kind: 'pageApiRequest', id, url, body, method }, window.location.origin);
     });
   }
 
@@ -72,6 +73,24 @@
       const total = Number((json.data && json.data.total_count) || 0);
       if (got.length < T.PAGE_SIZE || parents.length >= total) break;
       await sleep(300);
+    }
+
+    // Each sub-campaign's own rules ("at least 20% off the retail price"). A
+    // failure leaves that one without rules rather than failing the read.
+    const rules = new Map();
+    for (const subId of T.subIds(parents)) {
+      try {
+        const json = await pageApi(T.criteriaUrl(id, subId), null, 'GET');
+        rules.set(subId, T.criteriaOf(json.data));
+      } catch (_) {
+        /* left unread */
+      }
+      await sleep(200);
+    }
+    for (const p of parents) {
+      for (const s of p.com_campaigns_list || []) {
+        if (s && rules.has(String(s.id))) s.price_criteria = rules.get(String(s.id));
+      }
     }
     return { ok: true, sellerId: id, campaigns: parents, subCampaigns: T.subCount(parents) };
   }

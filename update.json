@@ -1,6 +1,7 @@
 {
-    "version": "1.26.0",
+    "version": "1.27.0",
     "notes": [
+        "TikTok campaigns: also reads each campaign's own price rules from its Criteria tab (e.g. \"Campaign price must be at least 20% off the retail price\") so ProfitLens prices your products to fit them. Read-only.",
         "Campaign nomination: ProfitLens can now ask Seller Centre which of your products a session will take (the same check as Add Products) before you nominate, and shows why not for the rest - out of stock, already nominated, or already waiting in Pending Submission. Read-only.",
         "Campaign nomination: when Shopee will not take some products for a session, says why in Shopee's own words (it used to say only \"not eligible\", which was a guess).",
         "TikTok campaigns: reads the campaigns your TikTok shop can register for (TikTok Seller Center → Campaigns) and sends them to ProfitLens, after each run and when you press Read now in ProfitLens. Read-only: it never registers a product or accepts a campaign's terms. Chrome now also needs to open seller-my.tiktok.com.",

@@ -79,19 +79,91 @@ test('finds the seller id in the addresses the page has called', () => {
   assert.strictEqual(T.sellerIdFrom(['https://seller-my.tiktok.com/api/v1/a?locale=en']), null);
 });
 
-test('the page relays only the campaign list', () => {
+test('the page relays only the campaign list (POST) and the criteria (GET)', () => {
   const src = fs.readFileSync(path.join(ROOT, 'content', 'tiktok-interceptor.js'), 'utf8');
-  const ALLOWED = eval(src.match(/const ALLOWED = (\/.*\/);/)[1]);
-  assert.ok(ALLOWED.test(T.listUrl('1')));
+  const ALLOWED = eval('(' + src.match(/const ALLOWED = (\{[\s\S]*?\});/)[1] + ')');
+  assert.ok(ALLOWED.POST.test(T.listUrl('1')));
+  assert.ok(ALLOWED.GET.test(T.criteriaUrl('1', '2')));
+  assert.ok(!ALLOWED.GET.test(T.listUrl('1')));
+  assert.ok(!ALLOWED.POST.test(T.criteriaUrl('1', '2')));
   for (const no of [
     '/api/v1/promotion/campaign/seller/register',
     '/api/v1/promotion/campaign/seller/parents_campaigns/list_more',
     'https://evil.example/api/v1/promotion/campaign/seller/parents_campaigns/list',
     '/api/v1/promotion/activity/update',
-  ]) assert.ok(!ALLOWED.test(no), no);
+    '/api/v1/promotion/campaign/seller/get_more?x=1',
+    'https://evil.example/api/v1/promotion/campaign/seller/get?x=1',
+  ]) {
+    assert.ok(!ALLOWED.POST.test(no), no);
+    assert.ok(!ALLOWED.GET.test(no), no);
+  }
 });
 
 test('summarises a run in one line', () => {
   assert.strictEqual(T.summary({ campaigns: 6 }), 'TikTok campaigns: 6 sent to ProfitLens');
   assert.strictEqual(T.summary({ error: 'Not logged in to TikTok Seller Center' }), 'TikTok campaigns: Not logged in to TikTok Seller Center');
+});
+
+// The Criteria tab's answer for October New Arrivals, 28 Oct 2026, trimmed.
+const CRITERIA = {
+  registration_criteria: {
+    registration_criteria_desc: [
+      {
+        criteria_category: 'Campaign sale price',
+        criteria_type: 1,
+        criteria_desc_detail: [
+          {
+            desc_format: 'Campaign price must be at least {{value1}}% off the retail price.',
+            desc_param: [
+              { param_key: 'starling_arr', param_value: '["promotion_product_campaign_detail_campaign_discount_range"]' },
+              { param_key: 'comparator', param_value: 'less than' },
+              { param_key: 'wrapper_operate_factor', param_value: '0.8' },
+              { param_key: 'factor_percent_off', param_value: '20' },
+              { param_key: 'value1', param_value: '20' },
+            ],
+            product_tier: 2,
+          },
+          { desc_format: 'Campaign price must be at least {{value1}}% off the retail price.', desc_param: [{ param_key: 'value1', param_value: '20' }, { param_key: 'factor_percent_off', param_value: '20' }] },
+        ],
+      },
+      { criteria_category: '', criteria_type: 2, criteria_desc_detail: [{ desc_format: 'Only invited shops can register for this campaign', desc_param: [] }] },
+    ],
+  },
+};
+
+test('criteriaOf: the price rules in the Criteria tab words, with the % off retail', () => {
+  assert.deepStrictEqual(plain(T.criteriaOf(CRITERIA)), [
+    { category: 'Campaign sale price', text: 'Campaign price must be at least 20% off the retail price.', percentOff: 20 },
+  ]);
+});
+
+test('criteriaOf: a rule with no % off, a slot left unfilled, and nothing at all', () => {
+  const data = {
+    registration_criteria: {
+      registration_criteria_desc: [
+        {
+          criteria_category: 'Campaign sale price',
+          criteria_type: 1,
+          criteria_desc_detail: [
+            { desc_format: 'Campaign price must be lower than retail price', desc_param: [{ param_key: 'comparator', param_value: 'less than' }] },
+            { desc_format: 'Paid in the past {{value2}} days, {{other}}', desc_param: [{ param_key: 'value2', param_value: '14' }] },
+          ],
+        },
+      ],
+    },
+  };
+  assert.deepStrictEqual(plain(T.criteriaOf(data)), [
+    { category: 'Campaign sale price', text: 'Campaign price must be lower than retail price', percentOff: null },
+    { category: 'Campaign sale price', text: 'Paid in the past 14 days, {{other}}', percentOff: null },
+  ]);
+  assert.deepStrictEqual(plain(T.criteriaOf(null)), []);
+  assert.deepStrictEqual(plain(T.criteriaOf({})), []);
+});
+
+test('criteriaUrl and subIds', () => {
+  assert.strictEqual(
+    T.criteriaUrl('7494690219360291509', '7686147017822816007'),
+    '/api/v1/promotion/campaign/seller/get?locale=en&language=en&oec_seller_id=7494690219360291509&aid=4068&app_name=i18n_ecom_shop&sub_campaign_id=7686147017822816007'
+  );
+  assert.deepStrictEqual(plain(T.subIds(T.parentsOf(LIST))), ['7689310386373347078']);
 });
