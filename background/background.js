@@ -12,7 +12,7 @@
 
 // lib/diagnostics.js builds the report the Options page copies. It is a plain
 // script attaching to self, not a module, because this worker is not one.
-importScripts('../lib/diagnostics.js', '../lib/campaigns.js', '../lib/vouchers.js', '../lib/nominations.js', '../lib/tiktok-campaigns.js');
+importScripts('../lib/diagnostics.js', '../lib/campaigns.js', '../lib/vouchers.js', '../lib/nominations.js', '../lib/tiktok-campaigns.js', '../lib/tiktok-videos.js');
 const Diagnostics = self.SRD_Diagnostics;
 const Campaigns = self.SRD_Campaigns;
 
@@ -140,7 +140,8 @@ function publicState() {
     error: state.error,
     results: state.results,
     campaigns: state.campaigns,
-    tiktokCampaigns: state.tiktokCampaigns
+    tiktokCampaigns: state.tiktokCampaigns,
+    tiktokVideos: state.tiktokVideos
   };
 }
 
@@ -974,6 +975,7 @@ async function recordHistory(selected) {
     error: state.error || '',
     campaigns: (state.campaigns && state.campaigns.text) || '',
     tiktokCampaigns: (state.tiktokCampaigns && state.tiktokCampaigns.text) || '',
+    tiktokVideos: (state.tiktokVideos && state.tiktokVideos.text) || '',
     reports: selected.map((ex) => {
       const result = state.results[ex.id] || {};
       return {
@@ -1646,7 +1648,7 @@ async function waitForTikTokScript(tabId) {
   }
   // The tab predates this version: inject both worlds by hand, once.
   await chrome.scripting.executeScript({ target: { tabId }, files: ['content/tiktok-interceptor.js'], world: 'MAIN' });
-  await chrome.scripting.executeScript({ target: { tabId }, files: ['lib/tiktok-campaigns.js', 'content/tiktok.js'], world: 'ISOLATED' });
+  await chrome.scripting.executeScript({ target: { tabId }, files: ['lib/tiktok-campaigns.js', 'lib/tiktok-videos.js', 'content/tiktok.js'], world: 'ISOLATED' });
 }
 
 /** Reads the list in a background Seller Center tab. */
@@ -1707,6 +1709,77 @@ async function syncTikTokCampaigns() {
   state.tiktokCampaigns = { status: result.error ? 'error' : 'done', text: self.SRD_TikTokCampaigns.summary(result) };
   persist();
   return state.tiktokCampaigns;
+}
+
+/* ==================================================================== *
+ * TikTok video links → ProfitLens
+ *
+ * tiktok.com will not play some creators' videos in a browser; Seller
+ * Center's video analytics does, from a list that carries each video's play
+ * address for 24 hours (lib/tiktok-videos.js). A background tab reads it so
+ * ProfitLens can play them. Read-only. Two callers, like the campaign list:
+ * the end of a run, and ProfitLens's page when a video's link has run out.
+ * ==================================================================== */
+const TIKTOK_VIDEO_URL = 'https://seller-my.tiktok.com/compass/video-analytics/video-details?platform_data_source=shop&shop_region=MY';
+const TIKTOK_VIDEO_ENDPOINT = '/api/import/tiktok-video-links';
+const VIDEO_LINKS_PER_PUSH = 500;
+
+async function captureTikTokVideoLinks() {
+  let tabId = null;
+  try {
+    const tab = await chrome.tabs.create({ url: TIKTOK_VIDEO_URL, active: false });
+    tabId = tab.id;
+    await awaitTabLoad(tabId);
+    await waitForTikTokScript(tabId);
+    const captured = await sendToContent(tabId, { type: 'captureTikTokVideoLinks' });
+    if (!captured) return { ok: false, error: 'TikTok Seller Center did not answer' };
+    return captured;
+  } catch (e) {
+    const msg = (e && e.message) || String(e);
+    return { ok: false, error: msg === ERR.NOT_LOGGED_IN ? 'Not logged in to TikTok Seller Center' : msg };
+  } finally {
+    if (tabId != null) {
+      try {
+        await chrome.tabs.remove(tabId);
+      } catch (_) {
+        /* already gone */
+      }
+    }
+  }
+}
+
+async function syncTikTokVideoLinks() {
+  const settings = await getPushSettings();
+  if (!settings.pushToProfitLens) return null;
+
+  state.tiktokVideos = { status: 'running', text: 'TikTok video links: reading Seller Center…' };
+  persist();
+  const session = {};
+  let result;
+  try {
+    const captured = await captureTikTokVideoLinks();
+    if (!captured.ok) throw new Error(captured.error);
+    Object.assign(session, await ensureProfitLensTab(settings.profitLensOrigin));
+    let videos = 0;
+    for (const batch of Campaigns.chunk(captured.links, VIDEO_LINKS_PER_PUSH)) {
+      const res = await chrome.tabs.sendMessage(session.tabId, {
+        type: 'pushJson',
+        endpoint: TIKTOK_VIDEO_ENDPOINT,
+        body: { sellerId: captured.sellerId, links: batch }
+      });
+      if (!res) throw new Error('ProfitLens did not answer');
+      if (res.error) throw new Error(res.error === 'NOT_LOGGED_IN' ? 'Not logged in to ProfitLens' : res.error);
+      videos += res.data.saved || 0;
+    }
+    result = { videos };
+  } catch (e) {
+    result = { error: (e && e.message) || String(e) };
+  } finally {
+    await closePushSession(session);
+  }
+  state.tiktokVideos = { status: result.error ? 'error' : 'done', text: self.SRD_TikTokVideos.summary(result) };
+  persist();
+  return state.tiktokVideos;
 }
 
 /* ==================================================================== *
@@ -1813,6 +1886,7 @@ async function runExports(ids, mode) {
   state.results = blankResults(ids);
   state.campaigns = null;
   state.tiktokCampaigns = null;
+  state.tiktokVideos = null;
   state.orderLog = [];
   // A stray from yesterday must not be reported against today.
   state.strays = [];
@@ -1893,6 +1967,11 @@ async function runExports(ids, mode) {
       await syncTikTokCampaigns();
     } catch (_) {
       /* nor TikTok's campaign list */
+    }
+    try {
+      await syncTikTokVideoLinks();
+    } catch (_) {
+      /* nor TikTok's video links */
     }
   }
 
@@ -2133,6 +2212,16 @@ async function handle(msg, sender) {
       const allowed = [settings.profitLensOrigin, 'https://profitlens.my', 'http://localhost', 'http://127.0.0.1'].filter(Boolean);
       if (!allowed.some((o) => from.startsWith(o))) return { ok: false, error: 'Only ProfitLens can ask for this' };
       return captureTikTokCampaigns();
+    }
+
+    // ProfitLens's video player, when a video's link has run out. Read-only;
+    // the page sends the links to its own API.
+    case 'readTikTokVideoLinks': {
+      const from = sender && sender.url ? sender.url : '';
+      const settings = await getPushSettings();
+      const allowed = [settings.profitLensOrigin, 'https://profitlens.my', 'http://localhost', 'http://127.0.0.1'].filter(Boolean);
+      if (!allowed.some((o) => from.startsWith(o))) return { ok: false, error: 'Only ProfitLens can ask for this' };
+      return captureTikTokVideoLinks();
     }
 
     case 'getHistory': {

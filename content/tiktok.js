@@ -2,8 +2,9 @@
  * TikTok Seller Center — ISOLATED world.
  *
  * Reads the campaign list (lib/tiktok-campaigns.js), then each sub-campaign's
- * price rules, through the page relay in content/tiktok-interceptor.js and
- * hands them to the service worker. Read-only.
+ * price rules, and the videos' play addresses (lib/tiktok-videos.js), through
+ * the page relay in content/tiktok-interceptor.js and hands them to the
+ * service worker. Read-only.
  */
 (() => {
   'use strict';
@@ -95,11 +96,39 @@
     return { ok: true, sellerId: id, campaigns: parents, subCampaigns: T.subCount(parents) };
   }
 
+  /**
+   * Every video's play address over the last 28 days — creators' and the
+   * shop's own (lib/tiktok-videos.js). Best sellers first, so a read cut short
+   * still has the ones ProfitLens shows.
+   */
+  async function captureTikTokVideoLinks() {
+    const V = self.SRD_TikTokVideos;
+    const id = await sellerId();
+    if (!id) return { ok: false, error: 'Not logged in to TikTok Seller Center (no shop found on the page)' };
+    const now = Date.now();
+    const links = [];
+    for (const authorType of [V.AUTHORS.creators, V.AUTHORS.own]) {
+      for (let page = 0; page < V.MAX_PAGES; page++) {
+        const got = V.linksOf(await pageApi(V.listUrl(id), V.listBody(authorType, page, now)));
+        links.push(...got.links);
+        if (!got.hasMore || got.rows === 0) break;
+        await sleep(300);
+      }
+    }
+    return { ok: true, sellerId: id, links };
+  }
+
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!msg || !msg.type) return undefined;
     if (msg.type === 'ping') {
       sendResponse({ ok: true, url: location.href });
       return undefined;
+    }
+    if (msg.type === 'captureTikTokVideoLinks') {
+      captureTikTokVideoLinks()
+        .then(sendResponse)
+        .catch((err) => sendResponse({ ok: false, error: (err && err.message) || String(err) }));
+      return true;
     }
     if (msg.type !== 'captureTikTokCampaigns') return undefined;
     captureTikTokCampaigns()

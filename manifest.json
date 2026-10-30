@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Shopee Report Downloader",
-  "version": "1.27.0",
+  "version": "1.28.0",
   "description": "Download all 7 Shopee Seller Center reports with one click",
   "minimum_chrome_version": "116",
   "permissions": [
@@ -63,7 +63,7 @@
     },
     {
       "matches": ["https://seller-my.tiktok.com/*"],
-      "js": ["lib/tiktok-campaigns.js", "content/tiktok.js"],
+      "js": ["lib/tiktok-campaigns.js", "lib/tiktok-videos.js", "content/tiktok.js"],
       "run_at": "document_idle",
       "world": "ISOLATED",
       "all_frames": false

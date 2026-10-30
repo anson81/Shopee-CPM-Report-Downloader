@@ -1,6 +1,7 @@
 {
-    "version": "1.27.0",
+    "version": "1.28.0",
     "notes": [
+        "TikTok videos: reads each video's play link from TikTok Seller Center (Analytics → Video) so ProfitLens can play creators' videos that tiktok.com shows as a blank page on a computer. After each run, and when you open such a video in ProfitLens. Read-only.",
         "TikTok campaigns: also reads each campaign's own price rules from its Criteria tab (e.g. \"Campaign price must be at least 20% off the retail price\") so ProfitLens prices your products to fit them. Read-only.",
         "Campaign nomination: ProfitLens can now ask Seller Centre which of your products a session will take (the same check as Add Products) before you nominate, and shows why not for the rest - out of stock, already nominated, or already waiting in Pending Submission. Read-only.",
         "Campaign nomination: when Shopee will not take some products for a session, says why in Shopee's own words (it used to say only \"not eligible\", which was a guess).",
@@ -28,6 +29,7 @@
         "lib/nominations.js",
         "lib/safe-name.js",
         "lib/tiktok-campaigns.js",
+        "lib/tiktok-videos.js",
         "lib/vouchers.js",
         "manifest.json",
         "offscreen/offscreen.html",

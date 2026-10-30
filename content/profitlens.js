@@ -152,7 +152,7 @@
 
     if (msg.type === 'srd:hello') {
       reply('srd:hello', msg.requestId, {
-        version: chrome.runtime.getManifest().version, vouchers: true, nominations: true, tiktokCampaigns: true, verifyNominations: true,
+        version: chrome.runtime.getManifest().version, vouchers: true, nominations: true, tiktokCampaigns: true, verifyNominations: true, tiktokVideos: true,
       });
       return;
     }
@@ -175,6 +175,13 @@
         .sendMessage({ type: 'readTikTokCampaigns' })
         .then((result) => reply('srd:readTikTokCampaigns', msg.requestId, { result: result || { ok: false, error: 'The extension did not answer' } }))
         .catch((err) => reply('srd:readTikTokCampaigns', msg.requestId, { result: { ok: false, error: (err && err.message) || String(err) } }));
+      return;
+    }
+    if (msg.type === 'srd:readTikTokVideoLinks') {
+      chrome.runtime
+        .sendMessage({ type: 'readTikTokVideoLinks' })
+        .then((result) => reply('srd:readTikTokVideoLinks', msg.requestId, { result: result || { ok: false, error: 'The extension did not answer' } }))
+        .catch((err) => reply('srd:readTikTokVideoLinks', msg.requestId, { result: { ok: false, error: (err && err.message) || String(err) } }));
       return;
     }
     if (msg.type === 'srd:createVouchers') {
