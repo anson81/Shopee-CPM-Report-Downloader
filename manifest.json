@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Shopee Report Downloader",
-  "version": "1.28.0",
+  "version": "1.29.0",
   "description": "Download all 7 Shopee Seller Center reports with one click",
   "minimum_chrome_version": "116",
   "permissions": [
@@ -17,6 +17,7 @@
     "https://seller.shopee.com.my/*",
     "https://*.shopee.com.my/*",
     "https://seller-my.tiktok.com/*",
+    "https://www.tiktok.com/*",
     "https://raw.githubusercontent.com/*",
     "https://profitlens.my/*",
     "http://localhost/*",

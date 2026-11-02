@@ -234,3 +234,19 @@ test("reads Add Products' eligibility check: which variations Shopee takes, and 
   assert.equal(r['2:24'].reason, 'Something new');
   assert.deepStrictEqual(plain(N.verifyResults(null)), {});
 });
+
+test('nominationRows reads each variation of the Nominated tab, as Seller Centre answered on 2 Nov 2026', () => {
+  const rows = N.nominationRows({
+    recruiting_entities: [
+      { entity_type: 2, product: { item_id: '21', item_name: 'Melody', models: [
+        { item_id: '21', model_id: '1', nominate_status: 30, action_reason: '', campaign_price: '3589000', campaign_stock: '0' },
+        { item_id: '21', model_id: '2', nominate_status: 10, action_reason: 'Price too high', campaign_price: '3789000', campaign_stock: '5' },
+      ] } },
+    ],
+  });
+  assert.deepStrictEqual(plain(rows), [
+    { itemId: '21', modelId: '1', status: 30, reason: null, priceSen: 3589, stock: 0, name: 'Melody' },
+    { itemId: '21', modelId: '2', status: 10, reason: 'Price too high', priceSen: 3789, stock: 5, name: 'Melody' },
+  ]);
+  assert.deepStrictEqual(plain(N.nominationRows(null)), []);
+});

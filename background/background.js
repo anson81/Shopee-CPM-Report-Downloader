@@ -12,9 +12,10 @@
 
 // lib/diagnostics.js builds the report the Options page copies. It is a plain
 // script attaching to self, not a module, because this worker is not one.
-importScripts('../lib/diagnostics.js', '../lib/campaigns.js', '../lib/vouchers.js', '../lib/nominations.js', '../lib/tiktok-campaigns.js', '../lib/tiktok-videos.js');
+importScripts('../lib/diagnostics.js', '../lib/campaigns.js', '../lib/vouchers.js', '../lib/nominations.js', '../lib/tiktok-campaigns.js', '../lib/tiktok-videos.js', '../lib/tiktok-web.js');
 const Diagnostics = self.SRD_Diagnostics;
 const Campaigns = self.SRD_Campaigns;
+const TikTokWeb = self.SRD_TikTokWeb;
 
 const BI_URL = 'https://seller.shopee.com.my/datacenter/product/overview';
 const ADS_URL = 'https://seller.shopee.com.my/portal/marketing/pas/index';
@@ -1563,6 +1564,8 @@ async function pushFromLastRun(id) {
 const CAMPAIGN_ENDPOINT = '/api/import/shopee-campaigns';
 /** Campaigns per request: Shopee's descriptions are long, ProfitLens takes 2 MB. */
 const CAMPAIGNS_PER_PUSH = 5;
+const NOMINATION_ENDPOINT = '/api/import/shopee-nominations';
+const NOMINATION_SESSIONS_PER_PUSH = 5;
 
 async function syncCampaigns() {
   const settings = await getPushSettings();
@@ -1600,7 +1603,17 @@ async function syncCampaigns() {
       campaigns += res.data.campaigns || 0;
       sessions += res.data.sessions || 0;
     }
-    result = { campaigns, sessions, sessionErrors: captured.sessionErrors || 0 };
+    let nominated = 0;
+    for (const batch of Campaigns.chunk(captured.nominations || [], NOMINATION_SESSIONS_PER_PUSH)) {
+      const res = await chrome.tabs.sendMessage(session.tabId, {
+        type: 'pushJson',
+        endpoint: NOMINATION_ENDPOINT,
+        body: { shopId: captured.shopId, capturedAt, sessions: batch }
+      });
+      // An older ProfitLens has no such address: the campaign list above still stands.
+      if (res && !res.error) nominated += res.data.saved || 0;
+    }
+    result = { campaigns, sessions, sessionErrors: (captured.sessionErrors || 0) + (captured.nominationErrors || 0), nominated };
   } catch (e) {
     result = { error: (e && e.message) || String(e) };
   } finally {
@@ -1746,6 +1759,50 @@ async function captureTikTokVideoLinks() {
       }
     }
   }
+}
+
+/* Find a video: a creator's page or one video's file, on the seller's ask from ProfitLens. */
+const TIKTOK_WEB_POLLS = 12;
+const TIKTOK_WEB_POLL_MS = 2500;
+
+async function readTikTokPage(url, func, args) {
+  let tabId = null;
+  try {
+    const tab = await chrome.tabs.create({ url, active: false });
+    tabId = tab.id;
+    await awaitTabLoad(tabId);
+    let last = { state: 'WAIT' };
+    for (let i = 0; i < TIKTOK_WEB_POLLS; i++) {
+      const [frame] = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func, args });
+      last = (frame && frame.result) || { state: 'WAIT' };
+      if (last.state !== 'WAIT') break;
+      await new Promise((resolve) => setTimeout(resolve, TIKTOK_WEB_POLL_MS));
+    }
+    const problem = TikTokWeb.problemOf(last.state);
+    return problem ? { ok: false, error: problem, state: last.state, about: last } : { ok: true, ...last };
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || String(e) };
+  } finally {
+    if (tabId != null) {
+      try {
+        await chrome.tabs.remove(tabId);
+      } catch (_) {
+        /* already gone */
+      }
+    }
+  }
+}
+
+function readCreatorVideos(text) {
+  const username = TikTokWeb.usernameOf(text);
+  if (!username) return { ok: false, error: 'Type the creator’s TikTok username, like @name' };
+  return readTikTokPage(`https://www.tiktok.com/@${username}`, TikTokWeb.pageReadCreator, []);
+}
+
+function readTikTokVideoFile(text) {
+  const url = TikTokWeb.videoUrlOf(text);
+  if (!url) return { ok: false, error: 'That is not a TikTok link' };
+  return readTikTokPage(url, TikTokWeb.pageReadVideoFile, [TikTokWeb.MAX_FILE_BYTES]);
 }
 
 async function syncTikTokVideoLinks() {
@@ -2216,6 +2273,15 @@ async function handle(msg, sender) {
 
     // ProfitLens's video player, when a video's link has run out. Read-only;
     // the page sends the links to its own API.
+    case 'readCreatorVideos':
+    case 'readTikTokVideoFile': {
+      const from = sender && sender.url ? sender.url : '';
+      const settings = await getPushSettings();
+      const allowed = [settings.profitLensOrigin, 'https://profitlens.my', 'http://localhost', 'http://127.0.0.1'].filter(Boolean);
+      if (!allowed.some((o) => from.startsWith(o))) return { ok: false, error: 'Only ProfitLens can ask for this' };
+      return msg.type === 'readCreatorVideos' ? readCreatorVideos(msg.username) : readTikTokVideoFile(msg.url);
+    }
+
     case 'readTikTokVideoLinks': {
       const from = sender && sender.url ? sender.url : '';
       const settings = await getPushSettings();

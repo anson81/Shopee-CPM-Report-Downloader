@@ -2113,6 +2113,42 @@
     });
   }
 
+  /**
+   * What is nominated into each joined session and whether it is approved.
+   * Read-only, through the page's own signed fetch like every Nominated read.
+   * Never stops the campaign list it follows.
+   */
+  async function readNominations(campaigns) {
+    const nominations = [];
+    let nominationErrors = 0;
+    const N = self.SRD_Nominations;
+    if (!N || typeof document === 'undefined') return { nominations, nominationErrors };
+    const cds = (document.cookie.match(/(?:^|; )SPC_CDS=([^;]+)/) || [])[1];
+    const at = (path) => (cds ? `${path}?SPC_CDS=${encodeURIComponent(cds)}&SPC_CDS_VER=2` : path);
+    const now = Date.now() / 1000;
+    for (const c of campaigns) {
+      for (const s of c.sessions || []) {
+        const st = s.statistics || {};
+        const joined = Number(st.nominated_count || 0) + Number(st.approved_count || 0) + Number(st.rejected_count || 0) > 0;
+        if (!joined || Number(s.session_end_time || 0) < now) continue;
+        try {
+          const rows = [];
+          for (let page = 1; page <= 50; page++) {
+            const res = await pageApi(at('/api/mkt/cmt/nominated/nominated_entity_list'), N.nominatedListBody({ sessionId: s.session_id }, page));
+            rows.push(...N.nominationRows(res && res.data));
+            if (N.nominatedEntities(res && res.data).length < 10) break;
+            await sleep(200);
+          }
+          nominations.push({ sessionId: String(s.session_id), rows });
+        } catch (_) {
+          nominationErrors += 1;
+        }
+        await sleep(200);
+      }
+    }
+    return { nominations, nominationErrors };
+  }
+
   async function captureCampaigns() {
     const C = self.SRD_Campaigns;
     let shop;
@@ -2155,13 +2191,17 @@
       await sleep(150); // one request at a time, gently — this is the seller's own session
     }
 
+    const { nominations, nominationErrors } = await readNominations(campaigns);
+
     return {
       ok: true,
       shopId: String(shop.shop_id),
       shopName: shop.name || '',
       region: shop.shop_region || '',
       campaigns,
-      sessionErrors
+      sessionErrors,
+      nominations,
+      nominationErrors
     };
   }
 
