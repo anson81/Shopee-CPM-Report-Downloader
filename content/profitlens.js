@@ -152,7 +152,7 @@
 
     if (msg.type === 'srd:hello') {
       reply('srd:hello', msg.requestId, {
-        version: chrome.runtime.getManifest().version, vouchers: true, nominations: true, tiktokCampaigns: true, verifyNominations: true, tiktokVideos: true, tiktokWeb: true,
+        version: chrome.runtime.getManifest().version, vouchers: true, nominations: true, tiktokCampaigns: true, verifyNominations: true, tiktokVideos: true, tiktokWeb: true, tiktokStudio: true,
       });
       return;
     }
@@ -177,9 +177,9 @@
         .catch((err) => reply('srd:readTikTokCampaigns', msg.requestId, { result: { ok: false, error: (err && err.message) || String(err) } }));
       return;
     }
-    if (msg.type === 'srd:readCreatorVideos' || msg.type === 'srd:readTikTokVideoFile') {
+    if (['srd:readCreatorVideos', 'srd:readTikTokVideoFile', 'srd:findCreators', 'srd:sendToTikTokStudio'].includes(msg.type)) {
       chrome.runtime
-        .sendMessage({ type: msg.type.replace('srd:', ''), username: msg.username, url: msg.url })
+        .sendMessage({ type: msg.type.replace('srd:', ''), username: msg.username, url: msg.url, query: msg.query, base64: msg.base64, filename: msg.filename })
         .then((result) => reply(msg.type, msg.requestId, { result: result || { ok: false, error: 'The extension did not answer' } }))
         .catch((err) => reply(msg.type, msg.requestId, { result: { ok: false, error: (err && err.message) || String(err) } }));
       return;

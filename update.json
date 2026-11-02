@@ -2,7 +2,7 @@
     "version": "1.29.0",
     "notes": [
         "Campaigns: reads what you nominated into each campaign and whether Shopee approved it, for ProfitLens.",
-        "Find a video: ProfitLens can show a creator's videos and fetch a pasted TikTok link for Duplicate, in a background tab of this browser, when you ask.",
+        "Find a video: ProfitLens can search creators in TikTok Affiliate Center and fetch a pasted link for Duplicate, in a background tab, when you ask. Send to TikTok opens TikTok Studio with a video ready for you to post.",
         "TikTok videos: reads each video's play link from TikTok Seller Center (Analytics → Video) so ProfitLens can play creators' videos that tiktok.com shows as a blank page on a computer. After each run, and when you open such a video in ProfitLens. Read-only.",
         "TikTok campaigns: also reads each campaign's own price rules from its Criteria tab (e.g. \"Campaign price must be at least 20% off the retail price\") so ProfitLens prices your products to fit them. Read-only.",
         "Campaign nomination: ProfitLens can now ask Seller Centre which of your products a session will take (the same check as Add Products) before you nominate, and shows why not for the rest - out of stock, already nominated, or already waiting in Pending Submission. Read-only.",

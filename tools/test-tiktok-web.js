@@ -30,6 +30,6 @@ test('videoUrlOf keeps tiktok.com links only, without the query', () => {
 });
 
 test('problemOf explains each state that stops a read, and nothing for READY', () => {
-  for (const s of ['VERIFY', 'LIMITED', 'WAIT', 'NOT_FOUND', 'NO_ADDRESS', 'NO_FILE', 'TOO_LARGE']) assert.ok(W.problemOf(s));
+  for (const s of ['VERIFY', 'LIMITED', 'WAIT', 'NOT_FOUND', 'NO_ADDRESS', 'NO_FILE', 'TOO_LARGE', 'NO_AFFILIATE']) assert.ok(W.problemOf(s));
   assert.strictEqual(W.problemOf('READY'), null);
 });

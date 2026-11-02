@@ -1793,6 +1793,34 @@ async function readTikTokPage(url, func, args) {
   }
 }
 
+function findCreators(query) {
+  const q = String(query || '').trim().replace(/^@/, '');
+  if (q.length < 2) return { ok: false, error: 'Type a creator’s name or @username' };
+  return readTikTokPage('https://affiliate.tiktok.com/connection/creator?shop_region=MY', TikTokWeb.pageFindCreators, [q]);
+}
+
+/** Opens TikTok Studio in front with the video in its upload box, and leaves it open for the seller. */
+async function sendToTikTokStudio({ base64, filename }) {
+  if (!base64) return { ok: false, error: 'No video to send' };
+  try {
+    const tab = await chrome.tabs.create({ url: 'https://www.tiktok.com/tiktokstudio/upload', active: true });
+    await awaitTabLoad(tab.id);
+    for (let i = 0; i < TIKTOK_WEB_POLLS; i++) {
+      const [frame] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'MAIN',
+        func: TikTokWeb.pageFillUpload,
+        args: [base64, filename || 'profitlens-video.mp4']
+      });
+      if (frame && frame.result && frame.result.state === 'READY') return { ok: true };
+      await new Promise((resolve) => setTimeout(resolve, TIKTOK_WEB_POLL_MS));
+    }
+    return { ok: false, error: 'TikTok Studio’s upload box did not appear. Are you signed in to TikTok in this Chrome?' };
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || String(e) };
+  }
+}
+
 function readCreatorVideos(text) {
   const username = TikTokWeb.usernameOf(text);
   if (!username) return { ok: false, error: 'Type the creator’s TikTok username, like @name' };
@@ -2273,12 +2301,16 @@ async function handle(msg, sender) {
 
     // ProfitLens's video player, when a video's link has run out. Read-only;
     // the page sends the links to its own API.
+    case 'findCreators':
+    case 'sendToTikTokStudio':
     case 'readCreatorVideos':
     case 'readTikTokVideoFile': {
       const from = sender && sender.url ? sender.url : '';
       const settings = await getPushSettings();
       const allowed = [settings.profitLensOrigin, 'https://profitlens.my', 'http://localhost', 'http://127.0.0.1'].filter(Boolean);
       if (!allowed.some((o) => from.startsWith(o))) return { ok: false, error: 'Only ProfitLens can ask for this' };
+      if (msg.type === 'findCreators') return findCreators(msg.query);
+      if (msg.type === 'sendToTikTokStudio') return sendToTikTokStudio(msg);
       return msg.type === 'readCreatorVideos' ? readCreatorVideos(msg.username) : readTikTokVideoFile(msg.url);
     }
 
