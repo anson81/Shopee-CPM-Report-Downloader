@@ -59,25 +59,48 @@ test("pageFindCreators takes TikTok's id from item_id, not Affiliate Center's vi
   assert.deepStrictEqual(JSON.parse(JSON.stringify(r.links.map((l) => l.videoId))), ['7699863396191128884']);
 });
 
-test('pageFillCaption waits for the box and the file name, replaces it, and checks it took', () => {
-  const box = { innerText: '', focus() {} };
+test('pageFillCaption waits for the box and the file name, pastes over it, never types, and checks it took', async () => {
+  const text = 'Lembut gila\n\n#ootd #baju';
+  const commands = [];
   let takes = true;
-  sandbox.document = {
-    querySelector: (css) => (css === '.public-DraftEditor-content' ? sandbox.__box : null),
-    execCommand: (cmd, _ui, text) => {
-      if (cmd === 'insertText' && takes) box.innerText = text;
+  let pastes = 0;
+  const box = {
+    innerText: '',
+    focus() {},
+    dispatchEvent(e) {
+      assert.strictEqual(e.type, 'paste');
+      pastes++;
+      if (takes) box.innerText = e.clipboardData.getData('text/plain');
     },
   };
   sandbox.__box = null;
-  assert.strictEqual(W.pageFillCaption('Lembut gila #ootd').state, 'WAIT');
+  sandbox.document = {
+    querySelector: (css) => (css === '.public-DraftEditor-content' ? sandbox.__box : null),
+    execCommand: (cmd) => commands.push(cmd),
+    dispatchEvent() {},
+  };
+  sandbox.setTimeout = setTimeout;
+  sandbox.Event = class { constructor(type) { this.type = type; } };
+  sandbox.DataTransfer = class {
+    setData(_type, value) { this.value = value; }
+    getData() { return this.value; }
+  };
+  sandbox.ClipboardEvent = class { constructor(type, init) { this.type = type; this.clipboardData = init.clipboardData; } };
+
+  assert.strictEqual((await W.pageFillCaption(text)).state, 'WAIT');
   sandbox.__box = box;
-  assert.strictEqual(W.pageFillCaption('Lembut gila #ootd').state, 'WAIT');
+  assert.strictEqual((await W.pageFillCaption(text)).state, 'WAIT');
   box.innerText = 'profitlens-g2';
   takes = false;
-  assert.strictEqual(W.pageFillCaption('Lembut gila #ootd').state, 'WAIT');
+  assert.strictEqual((await W.pageFillCaption(text)).state, 'NOT_TAKEN');
   takes = true;
-  assert.strictEqual(W.pageFillCaption('Lembut gila #ootd').state, 'READY');
-  assert.strictEqual(box.innerText, 'Lembut gila #ootd');
+  assert.strictEqual((await W.pageFillCaption(text)).state, 'READY');
+  assert.strictEqual(box.innerText, text);
+  // Asked again it leaves the words alone, and typing past the editor is what crashed Studio.
+  const before = pastes;
+  assert.strictEqual((await W.pageFillCaption(text)).state, 'READY');
+  assert.strictEqual(pastes, before);
+  assert.ok(!commands.includes('insertText'));
 });
 
 test('problemOf explains each state that stops a read, and nothing for READY', () => {

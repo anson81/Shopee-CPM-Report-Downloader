@@ -1802,7 +1802,8 @@ function findCreators(query) {
 /** Opens TikTok Studio in front with the video in its upload box, and leaves it open for the seller. */
 /** The caption, once Studio's box is there. False when it never took it; the video is in by then. */
 async function fillTikTokCaption(tabId, caption) {
-  for (let i = 0; i < 40; i++) {
+  let refused = 0;
+  for (let i = 0; i < 40 && refused < 3; i++) {
     await new Promise((resolve) => setTimeout(resolve, 1500));
     const [frame] = await chrome.scripting.executeScript({
       target: { tabId },
@@ -1811,6 +1812,7 @@ async function fillTikTokCaption(tabId, caption) {
       args: [caption]
     });
     if (frame && frame.result && frame.result.state === 'READY') return true;
+    if (frame && frame.result && frame.result.state === 'NOT_TAKEN') refused++;
   }
   return false;
 }
