@@ -290,10 +290,11 @@ test('pageReadVideoCover reads the cover and caption, and reports a check, a mis
   el = data({ itemInfo: { itemStruct: { desc: 'x', video: {} } } });
   assert.strictEqual((await W.pageReadVideoCover(1000)).state, 'NO_FILE');
   assert.strictEqual(fetched, 0);
-  el = data({ itemInfo: { itemStruct: { desc: 'Baju cantik', video: { cover: 'https://p16.tiktokcdn.com/c.jpg' } } } });
+  el = data({ itemInfo: { itemStruct: { desc: 'Baju cantik', author: { uniqueId: 'mellurr' }, video: { cover: 'https://p16.tiktokcdn.com/c.jpg' } } } });
   const r = await W.pageReadVideoCover(1000);
   assert.strictEqual(r.state, 'READY');
   assert.strictEqual(r.title, 'Baju cantik');
+  assert.strictEqual(r.username, 'mellurr');
   assert.strictEqual(r.base64, Buffer.from(bytes).toString('base64'));
   assert.strictEqual((await W.pageReadVideoCover(2)).state, 'TOO_LARGE');
 });

@@ -1,6 +1,7 @@
 {
-    "version": "1.32.0",
+    "version": "1.32.1",
     "notes": [
+        "Wishlist: also reads the creator of a video whose share link named none.",
         "Wishlist: reads the cover and caption of a saved TikTok video in a background tab when you open Make & post in ProfitLens. Read-only.",
         "Send to TikTok: also adds the product, sets the date and time you chose and turns on the AI-generated label. You check it and press Schedule.",
         "Send to TikTok: the caption replaces the file name TikTok writes in the description, instead of going after it. Hashtags become TikTok's own tags, picked from its list.",
