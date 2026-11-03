@@ -1800,8 +1800,11 @@ function findCreators(query) {
 }
 
 /** Opens TikTok Studio in front with the video in its upload box, and leaves it open for the seller. */
-/** The caption, once Studio's box is there. False when it never took it; the video is in by then. */
-async function fillTikTokCaption(tabId, caption) {
+/**
+ * The caption, once Studio's box is there. False when it never took it cleanly; the
+ * video is in by then. The file name is waited for about 15 s, in case TikTok stops writing it.
+ */
+async function fillTikTokCaption(tabId, caption, filename) {
   let refused = 0;
   for (let i = 0; i < 40 && refused < 3; i++) {
     await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -1809,9 +1812,10 @@ async function fillTikTokCaption(tabId, caption) {
       target: { tabId },
       world: 'MAIN',
       func: TikTokWeb.pageFillCaption,
-      args: [caption]
+      args: [caption, filename, i >= 10]
     });
     if (frame && frame.result && frame.result.state === 'READY') return true;
+    if (frame && frame.result && frame.result.state === 'LEFTOVER') return false;
     if (frame && frame.result && frame.result.state === 'NOT_TAKEN') refused++;
   }
   return false;
@@ -1830,7 +1834,7 @@ async function sendToTikTokStudio({ base64, filename, caption }) {
         args: [base64, filename || 'profitlens-video.mp4']
       });
       if (frame && frame.result && frame.result.state === 'READY') {
-        return { ok: true, captionFilled: caption ? await fillTikTokCaption(tab.id, caption) : false };
+        return { ok: true, captionFilled: caption ? await fillTikTokCaption(tab.id, caption, filename) : false };
       }
       await new Promise((resolve) => setTimeout(resolve, TIKTOK_WEB_POLL_MS));
     }

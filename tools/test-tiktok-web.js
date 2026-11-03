@@ -59,48 +59,95 @@ test("pageFindCreators takes TikTok's id from item_id, not Affiliate Center's vi
   assert.deepStrictEqual(JSON.parse(JSON.stringify(r.links.map((l) => l.videoId))), ['7699863396191128884']);
 });
 
-test('pageFillCaption waits for the box and the file name, pastes over it, never types, and checks it took', async () => {
-  const text = 'Lembut gila\n\n#ootd #baju';
+test('pageFillCaption replaces the file name through the editor, picks each hashtag from the list, and never types', async () => {
+  const text = 'Lembut gila\n\n#ootd #baju #tiadalist';
+  const file = 'profitlens-g2.mp4';
   const commands = [];
+  const selections = [];
   let takes = true;
-  let pastes = 0;
+  let list = [];
+  const pick = (tag) => {
+    const item = {
+      innerText: `${tag}\n3.5M posts`,
+      dispatchEvent(e) {
+        // Picking swaps the typed word for TikTok's tag and adds the space.
+        if (e.type === 'click') {
+          box.innerText += ' ';
+          list = [];
+        }
+      },
+    };
+    return item;
+  };
+  const block = { getKey: () => 'k', getLength: () => box.innerText.length };
+  const editorState = {
+    constructor: { forceSelection: (_state, selection) => selection },
+    getCurrentContent: () => ({ getFirstBlock: () => block, getLastBlock: () => block }),
+    getSelection: () => ({ merge: (range) => range }),
+  };
   const box = {
     innerText: '',
     focus() {},
     dispatchEvent(e) {
       assert.strictEqual(e.type, 'paste');
-      pastes++;
-      if (takes) box.innerText = e.clipboardData.getData('text/plain');
+      if (!takes) return;
+      const pasted = e.clipboardData.getData('text/plain');
+      const whole = selections[selections.length - 1].anchorOffset === 0;
+      box.innerText = whole ? pasted : box.innerText + pasted;
+      selections.push({ anchorOffset: box.innerText.length });
+      if (pasted === '#ootd' || pasted === '#baju') list = [pick('#OOTD-other'), pick(pasted)];
     },
+    __reactFiber$x: { memoizedProps: {}, return: { memoizedProps: { editorState, onChange: (range) => selections.push(range) }, return: null } },
   };
   sandbox.__box = null;
   sandbox.document = {
     querySelector: (css) => (css === '.public-DraftEditor-content' ? sandbox.__box : null),
+    querySelectorAll: () => list,
     execCommand: (cmd) => commands.push(cmd),
-    dispatchEvent() {},
   };
-  sandbox.setTimeout = setTimeout;
-  sandbox.Event = class { constructor(type) { this.type = type; } };
+  sandbox.setTimeout = (fn) => setTimeout(fn, 0);
+  sandbox.window = {};
+  sandbox.MouseEvent = class { constructor(type) { this.type = type; } };
   sandbox.DataTransfer = class {
     setData(_type, value) { this.value = value; }
     getData() { return this.value; }
   };
   sandbox.ClipboardEvent = class { constructor(type, init) { this.type = type; this.clipboardData = init.clipboardData; } };
 
-  assert.strictEqual((await W.pageFillCaption(text)).state, 'WAIT');
+  assert.strictEqual((await W.pageFillCaption(text, file)).state, 'WAIT');
   sandbox.__box = box;
-  assert.strictEqual((await W.pageFillCaption(text)).state, 'WAIT');
+  assert.strictEqual((await W.pageFillCaption(text, file)).state, 'WAIT');
+  // Something in the box, but not yet the file name.
+  box.innerText = 'Share more';
+  assert.strictEqual((await W.pageFillCaption(text, file)).state, 'WAIT');
   box.innerText = 'profitlens-g2';
   takes = false;
-  assert.strictEqual((await W.pageFillCaption(text)).state, 'NOT_TAKEN');
+  assert.strictEqual((await W.pageFillCaption(text, file)).state, 'NOT_TAKEN');
   takes = true;
-  assert.strictEqual((await W.pageFillCaption(text)).state, 'READY');
-  assert.strictEqual(box.innerText, text);
-  // Asked again it leaves the words alone, and typing past the editor is what crashed Studio.
-  const before = pastes;
-  assert.strictEqual((await W.pageFillCaption(text)).state, 'READY');
-  assert.strictEqual(pastes, before);
+  assert.strictEqual((await W.pageFillCaption(text, file)).state, 'READY');
+  assert.strictEqual(box.innerText.trim(), text);
+  assert.strictEqual(selections[0].anchorOffset, 0);
   assert.ok(!commands.includes('insertText'));
+
+  // Asked again it leaves the words alone.
+  const moves = selections.length;
+  assert.strictEqual((await W.pageFillCaption(text, file)).state, 'READY');
+  assert.strictEqual(selections.length, moves);
+
+  // The caption beside something else: reported, never a second copy.
+  box.innerText = `profitlens-g2${text}`;
+  assert.strictEqual((await W.pageFillCaption(text, file)).state, 'LEFTOVER');
+  assert.strictEqual(selections.length, moves);
+
+  // No file name after a while: it goes ahead.
+  box.innerText = 'Share more';
+  assert.strictEqual((await W.pageFillCaption(text, file, true)).state, 'READY');
+
+  // An editor it cannot reach: nothing is pasted.
+  box.innerText = 'profitlens-g2';
+  box.__reactFiber$x = null;
+  assert.strictEqual((await W.pageFillCaption(text, file)).state, 'NOT_TAKEN');
+  assert.strictEqual(box.innerText, 'profitlens-g2');
 });
 
 test('problemOf explains each state that stops a read, and nothing for READY', () => {
