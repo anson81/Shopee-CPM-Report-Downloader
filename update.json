@@ -1,6 +1,7 @@
 {
-    "version": "1.29.1",
+    "version": "1.30.0",
     "notes": [
+        "Send to TikTok: also fills in the caption and hashtags ProfitLens wrote. You add the product and AI label, and press Post.",
         "Find a video: fixes creators' videos not playing in ProfitLens after a search.",
         "Campaigns: reads what you nominated into each campaign and whether Shopee approved it, for ProfitLens.",
         "Find a video: ProfitLens can search creators in TikTok Affiliate Center and fetch a pasted link for Duplicate, in a background tab, when you ask. Send to TikTok opens TikTok Studio with a video ready for you to post.",

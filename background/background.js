@@ -1800,7 +1800,22 @@ function findCreators(query) {
 }
 
 /** Opens TikTok Studio in front with the video in its upload box, and leaves it open for the seller. */
-async function sendToTikTokStudio({ base64, filename }) {
+/** The caption, once Studio's box is there. False when it never took it; the video is in by then. */
+async function fillTikTokCaption(tabId, caption) {
+  for (let i = 0; i < 40; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const [frame] = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: TikTokWeb.pageFillCaption,
+      args: [caption]
+    });
+    if (frame && frame.result && frame.result.state === 'READY') return true;
+  }
+  return false;
+}
+
+async function sendToTikTokStudio({ base64, filename, caption }) {
   if (!base64) return { ok: false, error: 'No video to send' };
   try {
     const tab = await chrome.tabs.create({ url: 'https://www.tiktok.com/tiktokstudio/upload', active: true });
@@ -1812,7 +1827,9 @@ async function sendToTikTokStudio({ base64, filename }) {
         func: TikTokWeb.pageFillUpload,
         args: [base64, filename || 'profitlens-video.mp4']
       });
-      if (frame && frame.result && frame.result.state === 'READY') return { ok: true };
+      if (frame && frame.result && frame.result.state === 'READY') {
+        return { ok: true, captionFilled: caption ? await fillTikTokCaption(tab.id, caption) : false };
+      }
       await new Promise((resolve) => setTimeout(resolve, TIKTOK_WEB_POLL_MS));
     }
     return { ok: false, error: 'TikTok Studio’s upload box did not appear. Are you signed in to TikTok in this Chrome?' };

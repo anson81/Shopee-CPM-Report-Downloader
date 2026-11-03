@@ -59,6 +59,27 @@ test("pageFindCreators takes TikTok's id from item_id, not Affiliate Center's vi
   assert.deepStrictEqual(JSON.parse(JSON.stringify(r.links.map((l) => l.videoId))), ['7699863396191128884']);
 });
 
+test('pageFillCaption waits for the box and the file name, replaces it, and checks it took', () => {
+  const box = { innerText: '', focus() {} };
+  let takes = true;
+  sandbox.document = {
+    querySelector: (css) => (css === '.public-DraftEditor-content' ? sandbox.__box : null),
+    execCommand: (cmd, _ui, text) => {
+      if (cmd === 'insertText' && takes) box.innerText = text;
+    },
+  };
+  sandbox.__box = null;
+  assert.strictEqual(W.pageFillCaption('Lembut gila #ootd').state, 'WAIT');
+  sandbox.__box = box;
+  assert.strictEqual(W.pageFillCaption('Lembut gila #ootd').state, 'WAIT');
+  box.innerText = 'profitlens-g2';
+  takes = false;
+  assert.strictEqual(W.pageFillCaption('Lembut gila #ootd').state, 'WAIT');
+  takes = true;
+  assert.strictEqual(W.pageFillCaption('Lembut gila #ootd').state, 'READY');
+  assert.strictEqual(box.innerText, 'Lembut gila #ootd');
+});
+
 test('problemOf explains each state that stops a read, and nothing for READY', () => {
   for (const s of ['VERIFY', 'LIMITED', 'WAIT', 'NOT_FOUND', 'NO_ADDRESS', 'NO_FILE', 'TOO_LARGE', 'NO_AFFILIATE']) assert.ok(W.problemOf(s));
   assert.strictEqual(W.problemOf('READY'), null);
