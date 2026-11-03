@@ -1821,7 +1821,23 @@ async function fillTikTokCaption(tabId, caption, filename) {
   return false;
 }
 
-async function sendToTikTokStudio({ base64, filename, caption }) {
+/** One of Studio's fields, asked for again while the page is not ready. Its last state; it never presses Schedule or Post. */
+async function fillStudioStep(tabId, func, args) {
+  let state = 'NOT_SET';
+  try {
+    for (let i = 0; i < 30; i++) {
+      const [frame] = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func, args });
+      state = (frame && frame.result && frame.result.state) || 'NOT_SET';
+      if (state !== 'WAIT') return state;
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+  } catch (e) {
+    console.warn('TikTok Studio', e);
+  }
+  return state === 'WAIT' ? 'NOT_SET' : state;
+}
+
+async function sendToTikTokStudio({ base64, filename, caption, productId, at, aiLabel }) {
   if (!base64) return { ok: false, error: 'No video to send' };
   try {
     const tab = await chrome.tabs.create({ url: 'https://www.tiktok.com/tiktokstudio/upload', active: true });
@@ -1834,7 +1850,14 @@ async function sendToTikTokStudio({ base64, filename, caption }) {
         args: [base64, filename || 'profitlens-video.mp4']
       });
       if (frame && frame.result && frame.result.state === 'READY') {
-        return { ok: true, captionFilled: caption ? await fillTikTokCaption(tab.id, caption, filename) : false };
+        const captionFilled = caption ? await fillTikTokCaption(tab.id, caption, filename) : false;
+        return {
+          ok: true,
+          captionFilled,
+          product: productId ? await fillStudioStep(tab.id, TikTokWeb.pageAddProduct, [productId]) : null,
+          schedule: at ? await fillStudioStep(tab.id, TikTokWeb.pageSetSchedule, [at]) : null,
+          aiLabel: aiLabel ? await fillStudioStep(tab.id, TikTokWeb.pageSetAiLabel, []) : null
+        };
       }
       await new Promise((resolve) => setTimeout(resolve, TIKTOK_WEB_POLL_MS));
     }

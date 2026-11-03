@@ -150,6 +150,120 @@ test('pageFillCaption replaces the file name through the editor, picks each hash
   assert.strictEqual(box.innerText, 'profitlens-g2');
 });
 
+test('pageSetSchedule refuses another time zone, sets date and time, reports a mismatch, and has no way to press Schedule', async () => {
+  const at = { year: 2026, month: 12, day: 2, hour: 21, minute: 30 };
+  const values = [{ innerText: '3 Nov 2026' }, { innerText: '14:00' }];
+  let month = 'November 2026';
+  let panel = false;
+  let takes = true;
+  const clicked = [];
+  const button = (text, act) => ({ innerText: text, click() { clicked.push(text); act(); } });
+  const radio = { checked: false, click() { radio.checked = true; } };
+  const cell = (text, act) => ({ innerText: text, querySelector: () => button(text, act), firstElementChild: null });
+  const items = (list, act) => ({ querySelectorAll: () => list.map((t) => button(t, () => act(t))) });
+  let hour = '14';
+  let minute = '00';
+  sandbox.setTimeout = (fn) => setTimeout(fn, 0);
+  let offset = -480;
+  sandbox.Date = class extends Date { getTimezoneOffset() { return offset; } };
+  sandbox.document = {
+    querySelector: (css) => {
+      if (css.includes('value="schedule"')) return radio;
+      if (css === '.DatePicker__title') return { innerText: month };
+      if (css === '.TimePicker__panel') return panel ? {} : null;
+      return null;
+    },
+    querySelectorAll: (css) => {
+      if (css === '.schedule-picker .Picker__trigger') return [button('date', () => {}), button('time', () => { panel = !panel; })];
+      if (css === '.schedule-picker .Picker__value') return values;
+      if (css === '.DatePicker__nav') return [button('back', () => {}), button('next', () => { month = 'December 2026'; })];
+      if (css === '.DatePicker__dayCell') {
+        // The end of the month before, then this month, then the next month's start.
+        return ['30', '1', '2', '31', '1', '2'].map((d) => cell(d, () => { if (takes) values[0].innerText = `${d} Dec 2026`; }));
+      }
+      if (css === '.TimePicker__column') {
+        return [items(['20', '21'], (t) => { hour = t; values[1].innerText = `${hour}:${minute}`; }), items(['00', '30'], (t) => { minute = t; values[1].innerText = `${hour}:${minute}`; })];
+      }
+      return [];
+    },
+  };
+  offset = 0;
+  assert.strictEqual((await W.pageSetSchedule(at)).state, 'BAD_ZONE');
+  offset = -480;
+  assert.strictEqual((await W.pageSetSchedule(at)).state, 'READY');
+  assert.ok(radio.checked);
+  assert.strictEqual(values[0].innerText, '2 Dec 2026');
+  assert.strictEqual(values[1].innerText, '21:30');
+  assert.ok(!clicked.includes('Schedule') && !clicked.includes('Post'));
+
+  values[0].innerText = '3 Nov 2026';
+  month = 'November 2026';
+  takes = false;
+  assert.strictEqual((await W.pageSetSchedule(at)).state, 'NOT_SET');
+});
+
+test('pageAddProduct finds the product by id and adds it, and cancels when TikTok has no such product', async () => {
+  let chip = null;
+  let stage = 0;
+  let found = true;
+  const clicked = [];
+  const press = (name, act) => ({ innerText: name, click() { clicked.push(name); act(); } });
+  const input = { dispatchEvent() {} };
+  const row = { innerText: 'Layla 1738 RM23.99', querySelector: () => ({ click() { clicked.push('radio'); } }) };
+  sandbox.setTimeout = (fn) => setTimeout(fn, 0);
+  sandbox.HTMLInputElement = class { set value(_v) {} get value() { return ''; } };
+  sandbox.KeyboardEvent = class { constructor(type) { this.type = type; } };
+  sandbox.Event = class { constructor(type) { this.type = type; } };
+  sandbox.document = {
+    querySelector: (css) => {
+      if (css === '.anchor-tag-label') return chip;
+      if (css === '.anchor-tag-container button') return press('+ Add', () => { stage = 1; });
+      if (css.startsWith('input[placeholder')) return stage === 2 ? input : null;
+      return null;
+    },
+    querySelectorAll: (css) => {
+      if (css === '.common-modal-footer button') {
+        if (stage === 1) return [press('Cancel', () => {}), press('Next', () => { stage = 2; })];
+        if (stage === 2) return [press('Cancel', () => { stage = 0; }), press('Next', () => { stage = 3; })];
+        if (stage === 3) return [press('Cancel', () => {}), press('Add', () => { chip = {}; stage = 0; })];
+        return [];
+      }
+      if (css === 'tr.product-tb-row') return stage === 2 && found ? [row] : [];
+      return [];
+    },
+  };
+  assert.strictEqual((await W.pageAddProduct('1738')).state, 'READY');
+  assert.deepStrictEqual(clicked, ['+ Add', 'Next', 'radio', 'Next', 'Add']);
+  assert.strictEqual((await W.pageAddProduct('1738')).state, 'READY');
+  assert.strictEqual(clicked.length, 5);
+
+  chip = null;
+  stage = 0;
+  found = false;
+  clicked.length = 0;
+  assert.strictEqual((await W.pageAddProduct('999')).state, 'NOT_FOUND');
+  assert.deepStrictEqual(clicked, ['+ Add', 'Next', 'Cancel']);
+});
+
+test('pageSetAiLabel opens Show more, switches it on, and leaves a popup for the seller', async () => {
+  let open = false;
+  let popup = false;
+  const input = { checked: false, click() { input.checked = true; } };
+  const label = { children: [], textContent: 'AI-generated content', querySelector: () => input, parentElement: null };
+  const more = { children: [], innerText: 'Show more', click() { open = true; } };
+  sandbox.setTimeout = (fn) => setTimeout(fn, 0);
+  sandbox.document = {
+    querySelector: () => (popup ? {} : null),
+    querySelectorAll: (css) => (css === 'span,div' ? (open ? [label] : []) : [more]),
+  };
+  assert.strictEqual((await W.pageSetAiLabel()).state, 'READY');
+  assert.ok(open && input.checked);
+  assert.strictEqual((await W.pageSetAiLabel()).state, 'READY');
+  input.checked = false;
+  popup = true;
+  assert.strictEqual((await W.pageSetAiLabel()).state, 'POPUP');
+});
+
 test('problemOf explains each state that stops a read, and nothing for READY', () => {
   for (const s of ['VERIFY', 'LIMITED', 'WAIT', 'NOT_FOUND', 'NO_ADDRESS', 'NO_FILE', 'TOO_LARGE', 'NO_AFFILIATE']) assert.ok(W.problemOf(s));
   assert.strictEqual(W.problemOf('READY'), null);
