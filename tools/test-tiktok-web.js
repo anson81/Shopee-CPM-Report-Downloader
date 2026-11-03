@@ -264,6 +264,40 @@ test('pageSetAiLabel opens Show more, switches it on, and leaves a popup for the
   assert.strictEqual((await W.pageSetAiLabel()).state, 'POPUP');
 });
 
+test('pageReadVideoCover reads the cover and caption, and reports a check, a missing video and a slow page', async () => {
+  const data = (detail) => ({ textContent: JSON.stringify({ __DEFAULT_SCOPE__: { 'webapp.video-detail': detail } }) });
+  let el = null;
+  let captcha = false;
+  let title = 'TikTok';
+  sandbox.document = {
+    querySelector: () => (captcha ? {} : null),
+    getElementById: () => el,
+    get title() { return title; },
+  };
+  const bytes = new Uint8Array([0xff, 0xd8, 0xff]);
+  let fetched = 0;
+  sandbox.fetch = async () => { fetched++; return { ok: true, arrayBuffer: async () => bytes.buffer }; };
+  sandbox.btoa = (s) => Buffer.from(s, 'latin1').toString('base64');
+
+  assert.strictEqual((await W.pageReadVideoCover(1000)).state, 'WAIT');
+  title = 'www.tiktok.com';
+  assert.strictEqual((await W.pageReadVideoCover(1000)).state, 'LIMITED');
+  captcha = true;
+  assert.strictEqual((await W.pageReadVideoCover(1000)).state, 'VERIFY');
+  captcha = false;
+  el = data({ statusCode: 10204 });
+  assert.strictEqual((await W.pageReadVideoCover(1000)).state, 'NOT_FOUND');
+  el = data({ itemInfo: { itemStruct: { desc: 'x', video: {} } } });
+  assert.strictEqual((await W.pageReadVideoCover(1000)).state, 'NO_FILE');
+  assert.strictEqual(fetched, 0);
+  el = data({ itemInfo: { itemStruct: { desc: 'Baju cantik', video: { cover: 'https://p16.tiktokcdn.com/c.jpg' } } } });
+  const r = await W.pageReadVideoCover(1000);
+  assert.strictEqual(r.state, 'READY');
+  assert.strictEqual(r.title, 'Baju cantik');
+  assert.strictEqual(r.base64, Buffer.from(bytes).toString('base64'));
+  assert.strictEqual((await W.pageReadVideoCover(2)).state, 'TOO_LARGE');
+});
+
 test('problemOf explains each state that stops a read, and nothing for READY', () => {
   for (const s of ['VERIFY', 'LIMITED', 'WAIT', 'NOT_FOUND', 'NO_ADDRESS', 'NO_FILE', 'TOO_LARGE', 'NO_AFFILIATE']) assert.ok(W.problemOf(s));
   assert.strictEqual(W.problemOf('READY'), null);

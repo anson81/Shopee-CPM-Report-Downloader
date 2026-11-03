@@ -1879,6 +1879,14 @@ function readTikTokVideoFile(text) {
   return readTikTokPage(url, TikTokWeb.pageReadVideoFile, [TikTokWeb.MAX_FILE_BYTES]);
 }
 
+const MAX_COVER_BYTES = 1024 * 1024;
+
+function readTikTokVideoCover(text) {
+  const url = TikTokWeb.videoUrlOf(text);
+  if (!url) return { ok: false, error: 'That is not a TikTok link' };
+  return readTikTokPage(url, TikTokWeb.pageReadVideoCover, [MAX_COVER_BYTES]);
+}
+
 async function syncTikTokVideoLinks() {
   const settings = await getPushSettings();
   if (!settings.pushToProfitLens) return null;
@@ -2350,6 +2358,7 @@ async function handle(msg, sender) {
     case 'findCreators':
     case 'sendToTikTokStudio':
     case 'readCreatorVideos':
+    case 'readTikTokVideoCover':
     case 'readTikTokVideoFile': {
       const from = sender && sender.url ? sender.url : '';
       const settings = await getPushSettings();
@@ -2357,6 +2366,7 @@ async function handle(msg, sender) {
       if (!allowed.some((o) => from.startsWith(o))) return { ok: false, error: 'Only ProfitLens can ask for this' };
       if (msg.type === 'findCreators') return findCreators(msg.query);
       if (msg.type === 'sendToTikTokStudio') return sendToTikTokStudio(msg);
+      if (msg.type === 'readTikTokVideoCover') return readTikTokVideoCover(msg.url);
       return msg.type === 'readCreatorVideos' ? readCreatorVideos(msg.username) : readTikTokVideoFile(msg.url);
     }
 
