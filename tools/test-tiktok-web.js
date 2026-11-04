@@ -222,7 +222,7 @@ test('pageAddProduct finds the product by id and adds it, and cancels when TikTo
       return null;
     },
     querySelectorAll: (css) => {
-      if (css === '.common-modal-footer button') {
+      if (css === '.common-modal-footer button, [class*="modal"] button') {
         if (stage === 1) return [press('Cancel', () => {}), press('Next', () => { stage = 2; })];
         if (stage === 2) return [press('Cancel', () => { stage = 0; }), press('Next', () => { stage = 3; })];
         if (stage === 3) return [press('Cancel', () => {}), press('Add', () => { chip = {}; stage = 0; })];
