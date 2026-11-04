@@ -179,7 +179,7 @@
     }
     if (['srd:readCreatorVideos', 'srd:readTikTokVideoFile', 'srd:readTikTokVideoCover', 'srd:readTikTokStudioPosts', 'srd:findCreators', 'srd:sendToTikTokStudio'].includes(msg.type)) {
       chrome.runtime
-        .sendMessage({ type: msg.type.replace('srd:', ''), username: msg.username, url: msg.url, query: msg.query, base64: msg.base64, filename: msg.filename, caption: msg.caption, productId: msg.productId, at: msg.at, aiLabel: msg.aiLabel })
+        .sendMessage({ type: msg.type.replace('srd:', ''), username: msg.username, url: msg.url, query: msg.query, base64: msg.base64, filename: msg.filename, caption: msg.caption, productId: msg.productId, at: msg.at, aiLabel: msg.aiLabel, account: msg.account })
         .then((result) => reply(msg.type, msg.requestId, { result: result || { ok: false, error: 'The extension did not answer' } }))
         .catch((err) => reply(msg.type, msg.requestId, { result: { ok: false, error: (err && err.message) || String(err) } }));
       return;

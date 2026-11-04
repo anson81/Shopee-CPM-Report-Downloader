@@ -1822,26 +1822,35 @@ async function fillTikTokCaption(tabId, caption, filename) {
 }
 
 /** One of Studio's fields, asked for again while the page is not ready. Its last state; it never presses Schedule or Post. */
-async function fillStudioStep(tabId, func, args) {
+async function fillStudioStep(tabId, func, args, whole = false) {
   let state = 'NOT_SET';
   try {
     for (let i = 0; i < 30; i++) {
       const [frame] = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func, args });
       state = (frame && frame.result && frame.result.state) || 'NOT_SET';
-      if (state !== 'WAIT') return state;
+      if (state !== 'WAIT') return whole ? frame.result : state;
       await new Promise((resolve) => setTimeout(resolve, 1500));
     }
   } catch (e) {
     console.warn('TikTok Studio', e);
   }
+  if (whole) return null;
   return state === 'WAIT' ? 'NOT_SET' : state;
 }
 
-async function sendToTikTokStudio({ base64, filename, caption, productId, at, aiLabel }) {
+async function sendToTikTokStudio({ base64, filename, caption, productId, at, aiLabel, account }) {
   if (!base64) return { ok: false, error: 'No video to send' };
   try {
     const tab = await chrome.tabs.create({ url: 'https://www.tiktok.com/tiktokstudio/upload', active: true });
     await awaitTabLoad(tab.id);
+    // Nothing goes in under the wrong account: TikTok cannot be told which to use from here.
+    if (account) {
+      const who = await fillStudioStep(tab.id, TikTokWeb.pageStudioAccount, [], true);
+      if (who && who.username && who.username.toLowerCase() !== String(account).toLowerCase()) {
+        await chrome.tabs.remove(tab.id).catch(() => {});
+        return { ok: false, state: 'WRONG_ACCOUNT', signedIn: who.username, error: `This Chrome is signed in to TikTok as @${who.username}, not @${account}. Choose @${who.username}, or open ProfitLens in the Chrome profile for @${account}.` };
+      }
+    }
     for (let i = 0; i < TIKTOK_WEB_POLLS; i++) {
       const [frame] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
@@ -1902,7 +1911,7 @@ async function syncTikTokStudioPosts() {
     const read = await readTikTokStudioPosts();
     if (!read.ok || !read.posts.length) return;
     Object.assign(session, await ensureProfitLensTab(settings.profitLensOrigin));
-    await chrome.tabs.sendMessage(session.tabId, { type: 'pushJson', endpoint: '/api/import/tiktok-studio-posts', body: { posts: read.posts } });
+    await chrome.tabs.sendMessage(session.tabId, { type: 'pushJson', endpoint: '/api/import/tiktok-studio-posts', body: { account: read.account, posts: read.posts } });
   } finally {
     await closePushSession(session);
   }

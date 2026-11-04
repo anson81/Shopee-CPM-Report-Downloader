@@ -312,6 +312,7 @@ test('pageReadStudioPosts asks as the page does, reads two pages, and reports tr
   sandbox.location = { pathname: '/tiktokstudio/content' };
   sandbox.performance = { getEntriesByType: () => entries.map((name) => ({ name })) };
   sandbox.URL = URL;
+  sandbox.fetch = async () => ({ json: async () => ({ userBaseInfo: { UserProfile: { UserBase: { UniqId: 'qfm_official', NickName: 'Queen Fashion' } } } }) });
   sandbox.XMLHttpRequest = class {
     open(method, url) { this.method = method; this.url = url; }
     setRequestHeader() {}
@@ -335,6 +336,12 @@ test('pageReadStudioPosts asks as the page does, reads two pages, and reports tr
   assert.strictEqual(sent[1].body.cursor, 50);
   assert.deepStrictEqual(JSON.parse(JSON.stringify(r.posts[0])), { id: '71', title: 'v71', status: 140, postTime: 1793799000, views: 58, likes: 2, comments: 0, shares: 1 });
   assert.strictEqual(r.posts.length, 3);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(r.account)), { username: 'qfm_official', nickname: 'Queen Fashion' });
+
+  // No word on whose list it is: no list.
+  sandbox.fetch = async () => ({ json: async () => ({}) });
+  assert.strictEqual((await W.pageReadStudioPosts(2)).state, 'WAIT');
+  sandbox.fetch = async () => ({ json: async () => ({ userBaseInfo: { UserProfile: { UserBase: { UniqId: 'qfm_official', NickName: 'Queen Fashion' } } } }) });
 
   sent.length = 0;
   pagesOf[0] = { status_code: 10000 };
