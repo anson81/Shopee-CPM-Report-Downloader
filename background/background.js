@@ -1887,6 +1887,27 @@ function readTikTokVideoCover(text) {
   return readTikTokPage(url, TikTokWeb.pageReadVideoCover, [MAX_COVER_BYTES]);
 }
 
+const STUDIO_POSTS_PAGES = 2;
+
+function readTikTokStudioPosts() {
+  return readTikTokPage('https://www.tiktok.com/tiktokstudio/content', TikTokWeb.pageReadStudioPosts, [STUDIO_POSTS_PAGES]);
+}
+
+/** After a run: what TikTok Studio says is scheduled and posted, for ProfitLens. Read-only. */
+async function syncTikTokStudioPosts() {
+  const settings = await getPushSettings();
+  if (!settings.pushToProfitLens) return;
+  const session = {};
+  try {
+    const read = await readTikTokStudioPosts();
+    if (!read.ok || !read.posts.length) return;
+    Object.assign(session, await ensureProfitLensTab(settings.profitLensOrigin));
+    await chrome.tabs.sendMessage(session.tabId, { type: 'pushJson', endpoint: '/api/import/tiktok-studio-posts', body: { posts: read.posts } });
+  } finally {
+    await closePushSession(session);
+  }
+}
+
 async function syncTikTokVideoLinks() {
   const settings = await getPushSettings();
   if (!settings.pushToProfitLens) return null;
@@ -2111,6 +2132,11 @@ async function runExports(ids, mode) {
       await syncTikTokVideoLinks();
     } catch (_) {
       /* nor TikTok's video links */
+    }
+    try {
+      await syncTikTokStudioPosts();
+    } catch (_) {
+      /* nor TikTok Studio's posts */
     }
   }
 
@@ -2359,6 +2385,7 @@ async function handle(msg, sender) {
     case 'sendToTikTokStudio':
     case 'readCreatorVideos':
     case 'readTikTokVideoCover':
+    case 'readTikTokStudioPosts':
     case 'readTikTokVideoFile': {
       const from = sender && sender.url ? sender.url : '';
       const settings = await getPushSettings();
@@ -2367,6 +2394,7 @@ async function handle(msg, sender) {
       if (msg.type === 'findCreators') return findCreators(msg.query);
       if (msg.type === 'sendToTikTokStudio') return sendToTikTokStudio(msg);
       if (msg.type === 'readTikTokVideoCover') return readTikTokVideoCover(msg.url);
+      if (msg.type === 'readTikTokStudioPosts') return readTikTokStudioPosts();
       return msg.type === 'readCreatorVideos' ? readCreatorVideos(msg.username) : readTikTokVideoFile(msg.url);
     }
 

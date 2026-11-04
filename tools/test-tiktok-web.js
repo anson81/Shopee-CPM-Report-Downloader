@@ -299,6 +299,53 @@ test('pageReadVideoCover reads the cover and caption, and reports a check, a mis
   assert.strictEqual((await W.pageReadVideoCover(2)).state, 'TOO_LARGE');
 });
 
+test('pageReadStudioPosts asks as the page does, reads two pages, and reports trouble', async () => {
+  const item = (id, status) => ({ item_id: id, desc: `v${id}`, status, post_time: '1793799000', play_count: '58', like_count: '2', comment_count: '0', share_count: '1' });
+  const pagesOf = [
+    { status_code: 0, has_more: true, cursor: 50, item_list: [item('71', 140), item('72', 102)] },
+    { status_code: 0, has_more: true, cursor: 100, item_list: [item('73', 102)] },
+  ];
+  let captcha = false;
+  let entries = [];
+  const sent = [];
+  sandbox.document = { querySelector: () => (captcha ? {} : null) };
+  sandbox.location = { pathname: '/tiktokstudio/content' };
+  sandbox.performance = { getEntriesByType: () => entries.map((name) => ({ name })) };
+  sandbox.URL = URL;
+  sandbox.XMLHttpRequest = class {
+    open(method, url) { this.method = method; this.url = url; }
+    setRequestHeader() {}
+    send(body) {
+      sent.push({ method: this.method, url: this.url, body: JSON.parse(body) });
+      const answer = pagesOf[sent.length - 1];
+      if (answer === 'broken') return this.onerror();
+      this.responseText = JSON.stringify(answer);
+      this.onload();
+    }
+  };
+
+  assert.strictEqual((await W.pageReadStudioPosts(2)).state, 'WAIT');
+  entries = ['https://www.tiktok.com/tiktok/creator/manage/item_list/v1/?aid=1&X-Bogus=abc&msToken=def'];
+  const r = await W.pageReadStudioPosts(2);
+  assert.strictEqual(r.state, 'READY');
+  assert.strictEqual(sent.length, 2);
+  assert.strictEqual(sent[0].method, 'POST');
+  assert.ok(sent[0].url.includes('aid=1') && !sent[0].url.includes('X-Bogus') && !sent[0].url.includes('msToken'));
+  assert.strictEqual(sent[0].body.cursor, 0);
+  assert.strictEqual(sent[1].body.cursor, 50);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(r.posts[0])), { id: '71', title: 'v71', status: 140, postTime: 1793799000, views: 58, likes: 2, comments: 0, shares: 1 });
+  assert.strictEqual(r.posts.length, 3);
+
+  sent.length = 0;
+  pagesOf[0] = { status_code: 10000 };
+  assert.strictEqual((await W.pageReadStudioPosts(2)).state, 'LIMITED');
+  captcha = true;
+  assert.strictEqual((await W.pageReadStudioPosts(2)).state, 'VERIFY');
+  captcha = false;
+  sandbox.location = { pathname: '/login' };
+  assert.strictEqual((await W.pageReadStudioPosts(2)).state, 'NOT_SIGNED_IN');
+});
+
 test('problemOf explains each state that stops a read, and nothing for READY', () => {
   for (const s of ['VERIFY', 'LIMITED', 'WAIT', 'NOT_FOUND', 'NO_ADDRESS', 'NO_FILE', 'TOO_LARGE', 'NO_AFFILIATE']) assert.ok(W.problemOf(s));
   assert.strictEqual(W.problemOf('READY'), null);

@@ -1,6 +1,7 @@
 {
-    "version": "1.32.2",
+    "version": "1.33.0",
     "notes": [
+        "TikTok Studio: reads your own list of posts so ProfitLens can show what is scheduled and posted. After each run, and when you open Make & post. Read-only.",
         "Send to TikTok: fixes the product step stopping at the first Add link window.",
         "Wishlist: also reads the creator of a video whose share link named none.",
         "Wishlist: reads the cover and caption of a saved TikTok video in a background tab when you open Make & post in ProfitLens. Read-only.",
