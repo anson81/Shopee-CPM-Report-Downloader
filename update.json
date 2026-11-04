@@ -1,6 +1,7 @@
 {
-    "version": "1.34.0",
+    "version": "1.34.1",
     "notes": [
+        "Send to TikTok: the product step now gets past the product list. It was pressing the Next of the window behind.",
         "Several TikTok accounts: reads which account this Chrome is signed in to, and Send to TikTok stops if it is not the one you chose.",
         "TikTok Studio: reads your own list of posts so ProfitLens can show what is scheduled and posted. After each run, and when you open Make & post. Read-only.",
         "Send to TikTok: fixes the product step stopping at the first Add link window.",
