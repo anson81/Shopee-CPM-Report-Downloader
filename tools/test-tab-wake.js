@@ -97,3 +97,21 @@ test('a loaded page that will not answer is brought forward, and says so when it
   assert.strictEqual(sandbox.retryableLoad('b'), true);
   assert.strictEqual(sandbox.retryableLoad('c'), false);
 });
+
+test('a TikTok page still not built after two looks is brought forward once', () => {
+  vm.runInContext(
+    `const TIKTOK_WEB_FORWARD_AFTER = 2;\n${lift('tiktokNudge')}\nthis.tiktokNudge = tiktokNudge;`,
+    sandbox
+  );
+  assert.strictEqual(sandbox.tiktokNudge(1, false), false);
+  assert.strictEqual(sandbox.tiktokNudge(2, false), true);
+  assert.strictEqual(sandbox.tiktokNudge(5, true), false);
+});
+
+test('a TikTok read brings its tab forward and gives the seller their tab back', () => {
+  const body = lift('readTikTokPage');
+  assert.match(body, /const before = await activeTab\(\)/, 'remembers the tab the seller is on');
+  assert.match(body, /tiktokNudge\(/);
+  assert.match(body, /chrome\.tabs\.update\(tabId, \{ active: true \}\)/);
+  assert.match(body, /chrome\.tabs\.update\(before\.id, \{ active: true \}\)/, 'returns to it afterwards');
+});

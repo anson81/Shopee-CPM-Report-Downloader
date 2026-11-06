@@ -1879,17 +1879,49 @@ async function captureTikTokVideoLinks() {
 const TIKTOK_WEB_POLLS = 12;
 const TIKTOK_WEB_POLL_MS = 2500;
 
+/**
+ * After how many unanswered looks a TikTok tab is brought to the front once.
+ * A Chrome that holds back background tabs (the P50, 6 Nov 2026) left TikTok's
+ * page unbuilt until it was clicked, so every read ended "did not finish loading".
+ */
+const TIKTOK_WEB_FORWARD_AFTER = 2;
+
+/** Whether this look at a still-waiting TikTok tab should bring it forward. */
+function tiktokNudge(look, broughtForward) {
+  return !broughtForward && look >= TIKTOK_WEB_FORWARD_AFTER;
+}
+
+/** The tab the seller is looking at, to give it back after a read. */
+async function activeTab() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    return tab || null;
+  } catch (_) {
+    return null;
+  }
+}
+
 async function readTikTokPage(url, func, args) {
   let tabId = null;
+  const before = await activeTab();
   try {
     const tab = await chrome.tabs.create({ url, active: false });
     tabId = tab.id;
     await awaitTabLoad(tabId);
     let last = { state: 'WAIT' };
+    let broughtForward = false;
     for (let i = 0; i < TIKTOK_WEB_POLLS; i++) {
       const [frame] = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func, args });
       last = (frame && frame.result) || { state: 'WAIT' };
       if (last.state !== 'WAIT') break;
+      if (tiktokNudge(i + 1, broughtForward)) {
+        broughtForward = true;
+        try {
+          await chrome.tabs.update(tabId, { active: true });
+        } catch (_) {
+          /* gone; the next look says so */
+        }
+      }
       await new Promise((resolve) => setTimeout(resolve, TIKTOK_WEB_POLL_MS));
     }
     const problem = TikTokWeb.problemOf(last.state);
@@ -1902,6 +1934,14 @@ async function readTikTokPage(url, func, args) {
         await chrome.tabs.remove(tabId);
       } catch (_) {
         /* already gone */
+      }
+    }
+    // Brought forward to load it: hand the seller back the tab they were on.
+    if (before && before.id !== tabId) {
+      try {
+        await chrome.tabs.update(before.id, { active: true });
+      } catch (_) {
+        /* they closed it meanwhile */
       }
     }
   }
