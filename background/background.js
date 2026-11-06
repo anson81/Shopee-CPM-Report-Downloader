@@ -67,6 +67,9 @@ const ERR = {
   NOT_LOGGED_IN: 'Please log in to Shopee Seller Center first, then click Download.',
   PAGE_TIMEOUT:
     'Shopee Seller Center took too long to load. Check your internet connection and try again.',
+  PAGE_SILENT:
+    'The Shopee page loaded but did not answer the extension, even brought to the front. ' +
+    'Run this report again.',
   TAB_GONE: 'The Shopee tab was closed. Start the download again.',
   CANCELLED: 'Cancelled.'
 };
@@ -960,7 +963,9 @@ async function sendToContent(tabId, msg) {
 }
 
 async function waitForContentScript(tabId) {
-  const deadline = Date.now() + 30000;
+  const started = Date.now();
+  const deadline = started + 30000;
+  let broughtForward = false;
   for (;;) {
     try {
       const res = await sendToContent(tabId, { type: 'ping' });
@@ -969,6 +974,16 @@ async function waitForContentScript(tabId) {
       /* not injected yet */
     }
     if (Date.now() > deadline) break;
+    // A loaded tab Chrome keeps frozen in the background runs no script, so
+    // it cannot answer. Bring it forward once, as for a page still loading.
+    if (!broughtForward && Date.now() - started >= 8000) {
+      broughtForward = true;
+      try {
+        await chrome.tabs.update(tabId, { active: true });
+      } catch (_) {
+        /* gone; the next ping says so */
+      }
+    }
     await sleep(500);
   }
 
@@ -993,7 +1008,27 @@ async function waitForContentScript(tabId) {
   } catch (_) {
     /* fall through */
   }
-  throw new AppError(ERR.PAGE_TIMEOUT);
+  throw new AppError(ERR.PAGE_SILENT);
+}
+
+/**
+ * Load one report tab and wait for the extension's script in it to answer.
+ * With `again`, the tab is brought to the front and reloaded first: a second
+ * try, one tab at a time, for those that failed while all loaded together.
+ */
+async function loadReportTab(tabId, again) {
+  if (again) {
+    await chrome.tabs.update(tabId, { active: true });
+    await chrome.tabs.reload(tabId);
+    await sleep(500);
+  }
+  await awaitTabLoad(tabId);
+  await waitForContentScript(tabId);
+}
+
+/** A load failure worth a second try: not a closed tab, a login page or a cancel. */
+function retryableLoad(message) {
+  return message === ERR.PAGE_TIMEOUT || message === ERR.PAGE_SILENT;
 }
 
 /* ==================================================================== *
@@ -1163,23 +1198,41 @@ async function preloadTabs(selected) {
   }
   await wakeTabs(tabs.map((t) => t.tabId));
 
-  const settled = await Promise.all(
+  const first = await Promise.all(
     tabs.map(async (t) => {
       try {
-        await awaitTabLoad(t.tabId);
-        await waitForContentScript(t.tabId);
+        await loadReportTab(t.tabId, false);
         setResult(t.ex.id, { detail: 'Page loaded.' });
-        return t;
+        return { t, ok: true };
       } catch (e) {
-        setResult(t.ex.id, {
-          status: 'error',
-          detail: '',
-          error: (e && e.message) || String(e)
-        });
-        return null;
+        return { t, ok: false, message: (e && e.message) || String(e) };
       }
     })
   );
+
+  // Tabs that timed out while all loaded at once get a second try, each in
+  // front and on its own: on the P50 the same one or two reports failed run
+  // after run while the rest of the batch came down.
+  const settled = [];
+  for (const r of first) {
+    let { ok, message } = r;
+    if (!ok && retryableLoad(message) && !state.cancel) {
+      setResult(r.t.ex.id, { detail: 'Loading page again…' });
+      try {
+        await loadReportTab(r.t.tabId, true);
+        setResult(r.t.ex.id, { detail: 'Page loaded.' });
+        ok = true;
+      } catch (e) {
+        message = (e && e.message) || String(e);
+      }
+    }
+    if (ok) {
+      settled.push(r.t);
+    } else {
+      setResult(r.t.ex.id, { status: 'error', detail: '', error: message });
+      settled.push(null);
+    }
+  }
 
   // One shared SPA settle instead of 15s per export.
   for (const t of settled) {

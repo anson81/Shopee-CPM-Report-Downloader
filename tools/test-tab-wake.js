@@ -69,9 +69,31 @@ test('report tabs are woken and kept from sleeping before the load wait', () => 
   const body = lift('preloadTabs');
   const keep = body.indexOf('autoDiscardable: false');
   const wake = body.indexOf('await wakeTabs(');
-  const wait = body.indexOf('await awaitTabLoad(');
+  const wait = body.indexOf('await loadReportTab(');
   assert.ok(keep > -1, 'report tabs must not be discardable');
   assert.ok(wake > -1, 'preloadTabs must wake its tabs');
   assert.ok(wait > -1, 'preloadTabs must still wait for each tab');
   assert.ok(wake < wait, 'tabs are woken before the load wait starts');
+});
+
+test('a tab that failed to load gets a second try, in front, before it is an error', () => {
+  const body = lift('preloadTabs');
+  assert.match(body, /loadReportTab\(t\.tabId, false\)/, 'first load is all at once');
+  assert.match(body, /retryableLoad\(message\)/, 'only timeouts are tried again');
+  assert.match(body, /loadReportTab\(r\.t\.tabId, true\)/, 'the second try is one tab at a time');
+  const again = lift('loadReportTab');
+  assert.match(again, /active: true[\s\S]*chrome\.tabs\.reload\(tabId\)/, 'brought forward, then reloaded');
+});
+
+test('a loaded page that will not answer is brought forward, and says so when it still will not', () => {
+  const body = lift('waitForContentScript');
+  assert.match(body, /chrome\.tabs\.update\(tabId, \{ active: true \}\)/);
+  assert.match(body, /ERR\.PAGE_SILENT/);
+  vm.runInContext(
+    `const ERR = { PAGE_TIMEOUT: 'a', PAGE_SILENT: 'b', TAB_GONE: 'c' };\n${lift('retryableLoad')}\nthis.retryableLoad = retryableLoad;`,
+    sandbox
+  );
+  assert.strictEqual(sandbox.retryableLoad('a'), true);
+  assert.strictEqual(sandbox.retryableLoad('b'), true);
+  assert.strictEqual(sandbox.retryableLoad('c'), false);
 });
