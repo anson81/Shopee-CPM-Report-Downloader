@@ -892,6 +892,28 @@ function loadNudge(tab, waitedMs, done) {
   return 'wait';
 }
 
+/**
+ * What to tell the seller when a tab landed on a sign-in page, naming the site
+ * it is: the Shopee wording on TikTok Studio (6 Nov 2026) sent the seller to
+ * Shopee for a TikTok sign-in. Null when the page is not a sign-in page.
+ */
+function signInProblem(url) {
+  const u = String(url || '');
+  if (!/accounts\.shopee|\/login|captcha|verify/i.test(u)) return null;
+  let host = '';
+  try {
+    host = new URL(u).hostname;
+  } catch (_) {
+    /* not a web address; keep the Shopee wording */
+  }
+  if (/(^|\.)tiktok\.com$/.test(host)) {
+    if (/^seller/.test(host)) return 'Not logged in to TikTok Seller Center';
+    if (/^affiliate/.test(host)) return 'Sign in to TikTok Affiliate Center in this Chrome, then try again.';
+    return 'Sign in to TikTok in this Chrome, then try again.';
+  }
+  return ERR.NOT_LOGGED_IN;
+}
+
 /** Wait for a tab to finish loading, and reject if it landed on a login page. */
 async function awaitTabLoad(tabId, timeoutMs) {
   const started = Date.now();
@@ -901,9 +923,8 @@ async function awaitTabLoad(tabId, timeoutMs) {
     const tab = await getTab(tabId);
     if (!tab) throw new AppError(ERR.TAB_GONE);
     if (tab.status === 'complete') {
-      if (/accounts\.shopee|\/login|captcha|verify/i.test(tab.url || '')) {
-        throw new AppError(ERR.NOT_LOGGED_IN);
-      }
+      const signIn = signInProblem(tab.url);
+      if (signIn) throw new AppError(signIn);
       return tab;
     }
     if (Date.now() > deadline) throw new AppError(ERR.PAGE_TIMEOUT);

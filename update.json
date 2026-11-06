@@ -1,6 +1,7 @@
 {
-    "version": "1.34.3",
+    "version": "1.34.4",
     "notes": [
+        "Send to TikTok: when this Chrome is not signed in to TikTok, it now says so, instead of asking you to log in to Shopee Seller Center.",
         "TikTok videos: fixes \"TikTok did not finish loading the page\" when ProfitLens fetches a video, cover or creator through your Chrome. A TikTok tab that is held back in the background is brought forward for a moment, then you are returned to the tab you were on.",
         "Downloads: fixes reports failing with \"took too long to load\" on a Chrome that holds back tabs it opens in the background (seen on Linux). Each report tab is brought forward as it opens, and a tab that still fails gets a second try on its own.",
         "Send to TikTok: the product step now gets past the product list. It was pressing the Next of the window behind.",

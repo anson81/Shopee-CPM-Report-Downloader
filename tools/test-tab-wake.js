@@ -115,3 +115,20 @@ test('a TikTok read brings its tab forward and gives the seller their tab back',
   assert.match(body, /chrome\.tabs\.update\(tabId, \{ active: true \}\)/);
   assert.match(body, /chrome\.tabs\.update\(before\.id, \{ active: true \}\)/, 'returns to it afterwards');
 });
+
+test('a sign-in page is named after its own site', () => {
+  const own = { URL };
+  vm.createContext(own);
+  vm.runInContext(
+    `const ERR = { NOT_LOGGED_IN: 'shopee' };\n${lift('signInProblem')}\nthis.signInProblem = signInProblem;`,
+    own
+  );
+  const s = own.signInProblem;
+  assert.strictEqual(s('https://seller.shopee.com.my/datacenter/product/overview'), null);
+  assert.strictEqual(s('https://accounts.shopee.com.my/seller/login'), 'shopee');
+  assert.strictEqual(s('https://www.tiktok.com/tiktokstudio/upload'), null);
+  assert.match(s('https://www.tiktok.com/login?redirect_url=x'), /Sign in to TikTok in this Chrome/);
+  assert.match(s('https://seller-my.tiktok.com/account/login'), /TikTok Seller Center/);
+  assert.match(s('https://affiliate.tiktok.com/login'), /Affiliate Center/);
+  assert.strictEqual(s(''), null);
+});
