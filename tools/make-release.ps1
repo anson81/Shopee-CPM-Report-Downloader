@@ -75,7 +75,7 @@ Write-Host "manifest.json: $old -> $Version"
 $skip = @('tools', 'docs', '.git', '.github', 'node_modules')
 # Developer notes, not runtime code. Shipping CLAUDE.md would write it onto
 # every machine on every update, for nothing.
-$skipFiles = @('CLAUDE.md')
+$skipFiles = @('CLAUDE.md', 'CLAUDE.local.md', 'MIGRATION_HANDOFF.md')
 $files = Get-ChildItem -Path $root -Recurse -File |
     Where-Object {
         $rel = $_.FullName.Substring($root.Length + 1).Replace('\', '/')
