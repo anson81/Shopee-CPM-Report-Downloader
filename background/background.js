@@ -872,9 +872,28 @@ function stripQuery(u) {
   return String(u || '').split('#')[0].split('?')[0];
 }
 
+/**
+ * What to do about a tab that has not finished loading.
+ *
+ * On the P50 (Chrome on Linux, 6 Nov 2026) a tab opened in the background did
+ * not load until someone clicked it. Every run lost five to seven of its eleven
+ * reports to "took too long to load", while the same reports had all come down
+ * on Windows the days before. A tab Chrome has put to sleep (discarded or never
+ * started) is reloaded; one that is still not done after a while is brought to
+ * the front once, which is what the click did.
+ */
+function loadNudge(tab, waitedMs, done) {
+  const asleep = tab.discarded || tab.status === 'unloaded';
+  if (asleep && !done.reload && waitedMs >= 3000) return 'reload';
+  if (!done.activate && waitedMs >= 10000) return 'activate';
+  return 'wait';
+}
+
 /** Wait for a tab to finish loading, and reject if it landed on a login page. */
 async function awaitTabLoad(tabId, timeoutMs) {
-  const deadline = Date.now() + (timeoutMs || 90000);
+  const started = Date.now();
+  const deadline = started + (timeoutMs || 90000);
+  const done = { reload: false, activate: false };
   for (;;) {
     const tab = await getTab(tabId);
     if (!tab) throw new AppError(ERR.TAB_GONE);
@@ -885,7 +904,41 @@ async function awaitTabLoad(tabId, timeoutMs) {
       return tab;
     }
     if (Date.now() > deadline) throw new AppError(ERR.PAGE_TIMEOUT);
+    const nudge = loadNudge(tab, Date.now() - started, done);
+    try {
+      if (nudge === 'reload') {
+        done.reload = true;
+        await chrome.tabs.reload(tabId);
+      } else if (nudge === 'activate') {
+        done.activate = true;
+        await chrome.tabs.update(tabId, { active: true });
+      }
+    } catch (_) {
+      /* the next look finds the tab gone, or still loading */
+    }
     await sleep(500);
+  }
+}
+
+/**
+ * Bring each tab to the front in turn until Chrome starts it, as a seller
+ * clicking through them would. Without this, a Chrome that holds background
+ * tabs back leaves them waiting out the whole timeout (see loadNudge).
+ */
+async function wakeTabs(tabIds) {
+  for (const tabId of tabIds) {
+    if (state.cancel) return;
+    try {
+      await chrome.tabs.update(tabId, { active: true });
+    } catch (_) {
+      continue; // gone; awaitTabLoad says so
+    }
+    const until = Date.now() + 2500;
+    while (Date.now() < until) {
+      await sleep(250);
+      const tab = await getTab(tabId);
+      if (!tab || tab.status === 'complete') break;
+    }
   }
 }
 
@@ -1100,7 +1153,15 @@ async function preloadTabs(selected) {
     trackTab(tab.id);
     tabs.push({ ex, tabId: tab.id });
     setResult(ex.id, { status: 'running', detail: 'Loading page…' });
+    // A report tab waits minutes between phases. Chrome must not put it to
+    // sleep in between and throw away the period already selected.
+    try {
+      await chrome.tabs.update(tab.id, { autoDiscardable: false });
+    } catch (_) {
+      /* an older Chrome without it still runs */
+    }
   }
+  await wakeTabs(tabs.map((t) => t.tabId));
 
   const settled = await Promise.all(
     tabs.map(async (t) => {
