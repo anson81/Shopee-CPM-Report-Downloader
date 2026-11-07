@@ -178,7 +178,7 @@ content/interceptor.js     MAIN world: blob / anchor / API interception
 content/content.js         ISOLATED world: all Shopee DOM interaction
 popup/                     toolbar UI
 options/                   update install + folder grant + update source
-tools/                     make-release.ps1, inspect-shopee.js
+tools/                     make-release.js, inspect-shopee.js
 icons/
 ```
 
@@ -227,8 +227,8 @@ cannot keep up otherwise.
 
 ### Releasing
 
-```powershell
-.\tools\make-release.ps1 -Version 1.8.1 -Notes "What changed"
+```bash
+node tools/make-release.js 1.8.1 "What changed"
 git add -A; git commit -m "v1.8.1"; git push
 ```
 
