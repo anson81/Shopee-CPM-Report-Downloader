@@ -116,6 +116,19 @@ test('a TikTok read brings its tab forward and gives the seller their tab back',
   assert.match(body, /chrome\.tabs\.update\(before\.id, \{ active: true \}\)/, 'returns to it afterwards');
 });
 
+test('TikTok Studio is opened at most once in 25 minutes, whoever asks', () => {
+  vm.runInContext(`const STUDIO_READ_GAP_MS = 25 * 60_000;\n${lift('studioReadDue')}\nthis.studioReadDue = studioReadDue;`, sandbox);
+  const min = 60_000;
+  const now = 1_000_000 * min;
+  assert.strictEqual(sandbox.studioReadDue(0, now), true, 'never read');
+  assert.strictEqual(sandbox.studioReadDue(now - 5 * min, now), false, 'read 5 min ago');
+  assert.strictEqual(sandbox.studioReadDue(now - 24 * min, now), false);
+  assert.strictEqual(sandbox.studioReadDue(now - 25 * min, now), true);
+  assert.strictEqual(sandbox.studioReadDue(now + 5 * min, now), true, 'a clock set back does not block it for good');
+  const body = text.slice(text.indexOf('async function readTikTokStudioPosts('));
+  assert.match(body.slice(0, 600), /studioReadDue\(/, 'the one read function checks it, so runs and ProfitLens both do');
+});
+
 test('a sign-in page is named after its own site', () => {
   const own = { URL };
   vm.createContext(own);

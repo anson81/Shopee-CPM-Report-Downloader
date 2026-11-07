@@ -2073,7 +2073,26 @@ function readTikTokVideoCover(text) {
 
 const STUDIO_POSTS_PAGES = 2;
 
-function readTikTokStudioPosts() {
+/**
+ * How soon TikTok Studio may be opened again after a read, whoever asks (a run, ProfitLens's
+ * Make & post, the always-on PC). Each read opens a Studio tab, and Chrome on the P50 has to
+ * bring it forward to load it, so asks from several places made it pop up every few minutes
+ * (7 Nov 2026). The always-on PC asks every 30 minutes; this is a little under that.
+ */
+const STUDIO_READ_GAP_MS = 25 * 60_000;
+
+/** Whether a Studio read may go ahead now, given when the last one started. */
+function studioReadDue(lastAt, now) {
+  return !(lastAt > 0) || now - lastAt >= STUDIO_READ_GAP_MS || now < lastAt;
+}
+
+async function readTikTokStudioPosts() {
+  const now = Date.now();
+  const { studioReadAt = 0 } = await chrome.storage.local.get('studioReadAt');
+  if (!studioReadDue(studioReadAt, now)) {
+    return { ok: false, recent: true, error: `TikTok Studio was read ${Math.round((now - studioReadAt) / 60_000)} min ago` };
+  }
+  await chrome.storage.local.set({ studioReadAt: now });
   return readTikTokPage('https://www.tiktok.com/tiktokstudio/content', TikTokWeb.pageReadStudioPosts, [STUDIO_POSTS_PAGES]);
 }
 
